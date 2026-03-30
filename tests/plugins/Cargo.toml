@@ -5,6 +5,7 @@ members = [
     "bad-actor-plugin",
     "http-plugin",
     "fs-plugin",
+    "sdk-example-plugin",
 ]
 resolver = "2"
 
