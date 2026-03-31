@@ -79,14 +79,26 @@ pub use workspace_boundary::{BoundaryVerdict, WorkspaceBoundary};
 
 /// Key names that indicate a sensitive value (case-insensitive substring match).
 const SENSITIVE_KEY_SUBSTRINGS: &[&str] = &[
-    "token", "password", "secret", "credential", "bearer", "api_key", "apikey", "api-key",
-    "user_key", "userkey", "user-key", "auth",
+    "token",
+    "password",
+    "secret",
+    "credential",
+    "bearer",
+    "api_key",
+    "apikey",
+    "api-key",
+    "user_key",
+    "userkey",
+    "user-key",
+    "auth",
 ];
 
 /// Returns true if a JSON key name looks like it holds a sensitive value.
 fn is_sensitive_param_key(key: &str) -> bool {
     let lower = key.to_lowercase();
-    SENSITIVE_KEY_SUBSTRINGS.iter().any(|pat| lower.contains(pat))
+    SENSITIVE_KEY_SUBSTRINGS
+        .iter()
+        .any(|pat| lower.contains(pat))
 }
 
 /// Redact sensitive values in a JSON object's top-level keys.

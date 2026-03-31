@@ -299,9 +299,8 @@ impl PluginManifest {
     /// malformed TOML.
     pub fn parse(toml_str: &str) -> Result<Self, PluginError> {
         // First, try to parse the raw TOML to get a table we can inspect.
-        let raw: toml::Value = toml::from_str(toml_str).map_err(|e| {
-            PluginError::MalformedToml(e.to_string())
-        })?;
+        let raw: toml::Value =
+            toml::from_str(toml_str).map_err(|e| PluginError::MalformedToml(e.to_string()))?;
 
         let table = raw.as_table().ok_or_else(|| {
             PluginError::MalformedToml("expected a TOML table at the top level".into())
@@ -316,7 +315,10 @@ impl PluginManifest {
     }
 
     /// Parse the nested `[plugin]` format.
-    fn parse_nested(toml_str: &str, table: &toml::map::Map<String, toml::Value>) -> Result<Self, PluginError> {
+    fn parse_nested(
+        toml_str: &str,
+        table: &toml::map::Map<String, toml::Value>,
+    ) -> Result<Self, PluginError> {
         // Validate the plugin section is a table.
         let plugin_val = table.get("plugin").unwrap();
         if !plugin_val.is_table() {
@@ -358,7 +360,10 @@ impl PluginManifest {
     }
 
     /// Parse the flat (legacy) format.
-    fn parse_flat(toml_str: &str, table: &toml::map::Map<String, toml::Value>) -> Result<Self, PluginError> {
+    fn parse_flat(
+        toml_str: &str,
+        table: &toml::map::Map<String, toml::Value>,
+    ) -> Result<Self, PluginError> {
         // Check required fields up front for clear error messages.
         for field in &["name", "version", "wasm_path", "capabilities"] {
             if !table.contains_key(*field) {
@@ -465,12 +470,8 @@ pub fn format_audit_summary(manifest: &PluginManifest) -> String {
         for tool in &manifest.tools {
             let (level_str, approval) = match tool.risk_level {
                 RiskLevel::Low => ("low", ""),
-                RiskLevel::Medium => {
-                    ("medium", " (requires approval in supervised mode)")
-                }
-                RiskLevel::High => {
-                    ("high", " (requires approval in supervised mode)")
-                }
+                RiskLevel::Medium => ("medium", " (requires approval in supervised mode)"),
+                RiskLevel::High => ("high", " (requires approval in supervised mode)"),
             };
             writeln!(
                 out,
@@ -667,7 +668,10 @@ cache = "/tmp/cache"
 "#;
         let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
 
-        assert_eq!(manifest.allowed_hosts, vec!["api.example.com", "cdn.example.com"]);
+        assert_eq!(
+            manifest.allowed_hosts,
+            vec!["api.example.com", "cdn.example.com"]
+        );
         assert_eq!(manifest.allowed_paths.len(), 2);
         assert_eq!(manifest.allowed_paths["data"], "/var/data");
         assert_eq!(manifest.allowed_paths["cache"], "/tmp/cache");
@@ -738,7 +742,10 @@ capabilities = ["tool"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("name"), "error should mention missing field 'name': {msg}");
+        assert!(
+            msg.contains("name"),
+            "error should mention missing field 'name': {msg}"
+        );
     }
 
     #[test]
@@ -750,7 +757,10 @@ capabilities = ["tool"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("version"), "error should mention missing field 'version': {msg}");
+        assert!(
+            msg.contains("version"),
+            "error should mention missing field 'version': {msg}"
+        );
     }
 
     #[test]
@@ -762,7 +772,10 @@ capabilities = ["tool"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("wasm_path"), "error should mention missing field 'wasm_path': {msg}");
+        assert!(
+            msg.contains("wasm_path"),
+            "error should mention missing field 'wasm_path': {msg}"
+        );
     }
 
     #[test]
@@ -775,7 +788,10 @@ capabilities = ["nonexistent"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for invalid capability: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for invalid capability: {msg}"
+        );
     }
 
     #[test]
@@ -787,7 +803,10 @@ wasm_path = "plugin.wasm"
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for invalid TOML syntax: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for invalid TOML syntax: {msg}"
+        );
     }
 
     #[test]
@@ -800,7 +819,10 @@ capabilities = ["tool"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("string"), "error should mention expected type: {msg}");
+        assert!(
+            msg.contains("string"),
+            "error should mention expected type: {msg}"
+        );
     }
 
     #[test]
@@ -814,7 +836,10 @@ permissions = ["fly_to_moon"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for invalid permission: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for invalid permission: {msg}"
+        );
     }
 
     #[test]
@@ -830,7 +855,10 @@ name = "incomplete"
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for tool missing required fields: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for tool missing required fields: {msg}"
+        );
     }
 
     #[test]
@@ -844,7 +872,10 @@ allowed_hosts = "not-a-list"
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for wrong type: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for wrong type: {msg}"
+        );
     }
 
     #[test]
@@ -858,7 +889,10 @@ allowed_paths = ["not", "a", "map"]
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for wrong type: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for wrong type: {msg}"
+        );
     }
 
     #[test]
@@ -905,15 +939,24 @@ parameters_schema = { type = "object", properties = { name = { type = "string" }
 
         assert_eq!(manifest.name, "full-plugin");
         assert_eq!(manifest.version, "2.3.1");
-        assert_eq!(manifest.description.as_deref(), Some("A fully-featured plugin"));
+        assert_eq!(
+            manifest.description.as_deref(),
+            Some("A fully-featured plugin")
+        );
         assert_eq!(manifest.author.as_deref(), Some("ZeroClaw Labs"));
         assert_eq!(manifest.wasm_path, "full_plugin.wasm");
-        assert_eq!(manifest.capabilities, vec![PluginCapability::Tool, PluginCapability::Channel]);
-        assert_eq!(manifest.permissions, vec![
-            PluginPermission::HttpClient,
-            PluginPermission::FileRead,
-            PluginPermission::EnvRead,
-        ]);
+        assert_eq!(
+            manifest.capabilities,
+            vec![PluginCapability::Tool, PluginCapability::Channel]
+        );
+        assert_eq!(
+            manifest.permissions,
+            vec![
+                PluginPermission::HttpClient,
+                PluginPermission::FileRead,
+                PluginPermission::EnvRead,
+            ]
+        );
         assert_eq!(manifest.allowed_hosts, vec!["api.example.com"]);
         assert_eq!(manifest.allowed_paths["data"], "/var/data");
         assert!(!manifest.wasi);
@@ -936,14 +979,17 @@ permissions = ["http_client", "file_read", "file_write", "env_read", "memory_rea
         let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
 
         assert_eq!(manifest.permissions.len(), 6);
-        assert_eq!(manifest.permissions, vec![
-            PluginPermission::HttpClient,
-            PluginPermission::FileRead,
-            PluginPermission::FileWrite,
-            PluginPermission::EnvRead,
-            PluginPermission::MemoryRead,
-            PluginPermission::MemoryWrite,
-        ]);
+        assert_eq!(
+            manifest.permissions,
+            vec![
+                PluginPermission::HttpClient,
+                PluginPermission::FileRead,
+                PluginPermission::FileWrite,
+                PluginPermission::EnvRead,
+                PluginPermission::MemoryRead,
+                PluginPermission::MemoryWrite,
+            ]
+        );
     }
 
     #[test]
@@ -956,12 +1002,15 @@ capabilities = ["tool", "channel", "memory", "observer"]
 "#;
         let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
 
-        assert_eq!(manifest.capabilities, vec![
-            PluginCapability::Tool,
-            PluginCapability::Channel,
-            PluginCapability::Memory,
-            PluginCapability::Observer,
-        ]);
+        assert_eq!(
+            manifest.capabilities,
+            vec![
+                PluginCapability::Tool,
+                PluginCapability::Channel,
+                PluginCapability::Memory,
+                PluginCapability::Observer,
+            ]
+        );
     }
 
     #[test]
@@ -973,7 +1022,10 @@ wasm_path = "plugin.wasm"
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("capabilities"), "error should mention missing 'capabilities': {msg}");
+        assert!(
+            msg.contains("capabilities"),
+            "error should mention missing 'capabilities': {msg}"
+        );
     }
 
     #[test]
@@ -1006,7 +1058,10 @@ capabilities = []
     fn test_malformed_manifest_empty_input() {
         let toml_str = "";
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
-        assert!(!err.to_string().is_empty(), "should produce an error for empty input");
+        assert!(
+            !err.to_string().is_empty(),
+            "should produce an error for empty input"
+        );
     }
 
     #[test]
@@ -1025,7 +1080,10 @@ risk_level = 42
 "#;
         let err = toml::from_str::<PluginManifest>(toml_str).unwrap_err();
         let msg = err.to_string();
-        assert!(!msg.is_empty(), "should produce an error for wrong type in tool field: {msg}");
+        assert!(
+            !msg.is_empty(),
+            "should produce an error for wrong type in tool field: {msg}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1069,12 +1127,18 @@ required = ["query"]
 
         assert_eq!(manifest.name, "nested-plugin");
         assert_eq!(manifest.version, "1.0.0");
-        assert_eq!(manifest.description.as_deref(), Some("A plugin using nested format"));
+        assert_eq!(
+            manifest.description.as_deref(),
+            Some("A plugin using nested format")
+        );
         assert_eq!(manifest.author.as_deref(), Some("ZeroClaw Labs"));
         assert_eq!(manifest.wasm_path, "nested.wasm");
         assert_eq!(manifest.capabilities, vec![PluginCapability::Tool]);
         assert_eq!(manifest.permissions, vec![PluginPermission::HttpClient]);
-        assert_eq!(manifest.allowed_hosts, vec!["api.example.com", "cdn.example.com"]);
+        assert_eq!(
+            manifest.allowed_hosts,
+            vec!["api.example.com", "cdn.example.com"]
+        );
         assert_eq!(manifest.allowed_paths.len(), 2);
         assert_eq!(manifest.allowed_paths["data"], "/var/data");
         assert_eq!(manifest.allowed_paths["cache"], "/tmp/cache");
@@ -1286,10 +1350,7 @@ plugin = "not-a-table"
         let err = PluginManifest::parse(toml_str).unwrap_err();
         match &err {
             PluginError::MalformedToml(msg) => {
-                assert!(
-                    msg.contains("table"),
-                    "error should mention 'table': {msg}"
-                );
+                assert!(msg.contains("table"), "error should mention 'table': {msg}");
             }
             other => panic!("expected MalformedToml, got: {other}"),
         }
@@ -1480,7 +1541,10 @@ parameters_schema = { type = "object", properties = { target = { type = "string"
         // Core fields
         assert_eq!(manifest.name, "complete-plugin");
         assert_eq!(manifest.version, "3.0.0");
-        assert_eq!(manifest.description.as_deref(), Some("A plugin testing every section"));
+        assert_eq!(
+            manifest.description.as_deref(),
+            Some("A plugin testing every section")
+        );
         assert_eq!(manifest.author.as_deref(), Some("Test Author"));
         assert_eq!(manifest.wasm_path, "complete.wasm");
         assert!(manifest.wasi);
@@ -1494,7 +1558,9 @@ parameters_schema = { type = "object", properties = { target = { type = "string"
 
         // Network
         assert_eq!(manifest.allowed_hosts.len(), 3);
-        assert!(manifest.allowed_hosts.contains(&"*.internal.io".to_string()));
+        assert!(manifest
+            .allowed_hosts
+            .contains(&"*.internal.io".to_string()));
 
         // Filesystem
         assert_eq!(manifest.allowed_paths.len(), 3);
@@ -1616,14 +1682,8 @@ risk_level = "critical"
     #[test]
     fn test_resolve_config_all_provided() {
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "api_key".to_string(),
-            serde_json::json!({"required": true}),
-        );
-        manifest_config.insert(
-            "model".to_string(),
-            serde_json::json!("gpt-4"),
-        );
+        manifest_config.insert("api_key".to_string(), serde_json::json!({"required": true}));
+        manifest_config.insert("model".to_string(), serde_json::json!("gpt-4"));
 
         let mut values = HashMap::new();
         values.insert("api_key".to_string(), "sk-test".to_string());
@@ -1637,10 +1697,7 @@ risk_level = "critical"
     #[test]
     fn test_resolve_config_uses_defaults() {
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "model".to_string(),
-            serde_json::json!("gpt-4"),
-        );
+        manifest_config.insert("model".to_string(), serde_json::json!("gpt-4"));
         manifest_config.insert(
             "temperature".to_string(),
             serde_json::json!({"default": "0.7"}),
@@ -1654,14 +1711,8 @@ risk_level = "critical"
     #[test]
     fn test_resolve_config_missing_required_keys() {
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "api_key".to_string(),
-            serde_json::json!({"required": true}),
-        );
-        manifest_config.insert(
-            "secret".to_string(),
-            serde_json::json!({"required": true}),
-        );
+        manifest_config.insert("api_key".to_string(), serde_json::json!({"required": true}));
+        manifest_config.insert("secret".to_string(), serde_json::json!({"required": true}));
 
         let err = resolve_plugin_config("my-plugin", &manifest_config, None).unwrap_err();
         match err {
@@ -1704,10 +1755,7 @@ risk_level = "critical"
     fn test_resolve_config_no_plugin_section_all_optional_succeeds() {
         let mut manifest_config = HashMap::new();
         manifest_config.insert("model".to_string(), serde_json::json!("gpt-4"));
-        manifest_config.insert(
-            "timeout".to_string(),
-            serde_json::json!({"default": "30"}),
-        );
+        manifest_config.insert("timeout".to_string(), serde_json::json!({"default": "30"}));
         manifest_config.insert(
             "optional_flag".to_string(),
             serde_json::json!({"sensitive": false}),
@@ -1724,15 +1772,18 @@ risk_level = "critical"
     #[test]
     fn test_resolve_config_missing_required_error_contains_key_name() {
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "db_url".to_string(),
-            serde_json::json!({"required": true}),
-        );
+        manifest_config.insert("db_url".to_string(), serde_json::json!({"required": true}));
 
         let err = resolve_plugin_config("db-plugin", &manifest_config, None).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("db_url"), "error should name the missing key: {msg}");
-        assert!(msg.contains("db-plugin"), "error should name the plugin: {msg}");
+        assert!(
+            msg.contains("db_url"),
+            "error should name the missing key: {msg}"
+        );
+        assert!(
+            msg.contains("db-plugin"),
+            "error should name the plugin: {msg}"
+        );
     }
 
     #[test]
@@ -1801,7 +1852,8 @@ risk_level = "critical"
         let mut values = HashMap::new();
         values.insert("token".to_string(), "secret-token-value-12345".to_string());
 
-        let result = resolve_plugin_config("sensitive-plugin", &manifest_config, Some(&values)).unwrap();
+        let result =
+            resolve_plugin_config("sensitive-plugin", &manifest_config, Some(&values)).unwrap();
         // The actual value is passed through — redaction is only for logging
         assert_eq!(result["token"], "secret-token-value-12345");
     }

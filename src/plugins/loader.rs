@@ -18,14 +18,7 @@ use crate::security::SecurityPolicy;
 /// Any `allowed_paths` entry whose resolved host path equals or is a child of
 /// one of these prefixes will be rejected with [`PluginError::ForbiddenPath`].
 pub const FORBIDDEN_PATHS: &[&str] = &[
-    "/etc",
-    "/root",
-    "/var",
-    "~/.ssh",
-    "~/.gnupg",
-    "/proc",
-    "/sys",
-    "/dev",
+    "/etc", "/root", "/var", "~/.ssh", "~/.gnupg", "/proc", "/sys", "/dev",
 ];
 
 /// Controls how strictly plugin network declarations are validated.
@@ -232,9 +225,7 @@ pub fn validate_workspace_paths(
 
         // Attempt real canonicalization to catch symlink escapes.
         // If the path doesn't exist yet, fall back to the logical absolute path.
-        let resolved = absolute
-            .canonicalize()
-            .unwrap_or_else(|_| absolute.clone());
+        let resolved = absolute.canonicalize().unwrap_or_else(|_| absolute.clone());
 
         if !resolved.starts_with(&canon_workspace) {
             return Err(PluginError::PathOutsideWorkspace {
@@ -528,8 +519,7 @@ pub fn build_extism_manifest(
 
     // Map allowed hosts.
     if !plugin_manifest.allowed_hosts.is_empty() {
-        manifest = manifest
-            .with_allowed_hosts(plugin_manifest.allowed_hosts.iter().cloned());
+        manifest = manifest.with_allowed_hosts(plugin_manifest.allowed_hosts.iter().cloned());
     }
 
     // Map allowed paths — resolve relative physical paths against workspace root.
@@ -807,10 +797,7 @@ logs  = "/var/log/app"
 
         // Manifest declares: api_key (required), model (default "gpt-4"), temperature (default "0.7")
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "api_key".to_string(),
-            serde_json::json!({"required": true}),
-        );
+        manifest_config.insert("api_key".to_string(), serde_json::json!({"required": true}));
         manifest_config.insert("model".to_string(), serde_json::json!("gpt-4"));
         manifest_config.insert(
             "temperature".to_string(),
@@ -824,9 +811,8 @@ logs  = "/var/log/app"
         config_values.insert("custom_flag".to_string(), "enabled".to_string());
 
         // Step 1: resolve config (as PluginHost would)
-        let resolved =
-            resolve_plugin_config("test-plugin", &manifest_config, Some(&config_values))
-                .expect("config resolution should succeed");
+        let resolved = resolve_plugin_config("test-plugin", &manifest_config, Some(&config_values))
+            .expect("config resolution should succeed");
 
         // Step 2: build extism manifest with the resolved config
         let pm = minimal_manifest();
@@ -834,10 +820,26 @@ logs  = "/var/log/app"
 
         // Verify all config values made it into the extism Manifest
         let ext_config = &result.manifest.config;
-        assert_eq!(ext_config.get("api_key"), Some(&"sk-live-abc".to_string()), "required key from config.toml");
-        assert_eq!(ext_config.get("model"), Some(&"claude-3".to_string()), "overridden default");
-        assert_eq!(ext_config.get("temperature"), Some(&"0.7".to_string()), "manifest default preserved");
-        assert_eq!(ext_config.get("custom_flag"), Some(&"enabled".to_string()), "passthrough extra key");
+        assert_eq!(
+            ext_config.get("api_key"),
+            Some(&"sk-live-abc".to_string()),
+            "required key from config.toml"
+        );
+        assert_eq!(
+            ext_config.get("model"),
+            Some(&"claude-3".to_string()),
+            "overridden default"
+        );
+        assert_eq!(
+            ext_config.get("temperature"),
+            Some(&"0.7".to_string()),
+            "manifest default preserved"
+        );
+        assert_eq!(
+            ext_config.get("custom_flag"),
+            Some(&"enabled".to_string()),
+            "passthrough extra key"
+        );
         assert_eq!(ext_config.len(), 4, "exactly 4 config entries");
     }
 
@@ -859,7 +861,11 @@ logs  = "/var/log/app"
 
         let ext_config = &result.manifest.config;
         assert_eq!(ext_config.get("log_level"), Some(&"info".to_string()));
-        assert_eq!(ext_config.get("retries"), Some(&"3".to_string()), "numeric default as string");
+        assert_eq!(
+            ext_config.get("retries"),
+            Some(&"3".to_string()),
+            "numeric default as string"
+        );
     }
 
     /// Missing required config keys produce a clear, actionable error that names
@@ -869,14 +875,8 @@ logs  = "/var/log/app"
         use crate::plugins::resolve_plugin_config;
 
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "api_key".to_string(),
-            serde_json::json!({"required": true}),
-        );
-        manifest_config.insert(
-            "db_url".to_string(),
-            serde_json::json!({"required": true}),
-        );
+        manifest_config.insert("api_key".to_string(), serde_json::json!({"required": true}));
+        manifest_config.insert("db_url".to_string(), serde_json::json!({"required": true}));
         // This key has a default, so it should NOT be reported as missing.
         manifest_config.insert("log_level".to_string(), serde_json::json!("info"));
 
@@ -914,14 +914,8 @@ logs  = "/var/log/app"
         use crate::plugins::resolve_plugin_config;
 
         let mut manifest_config = HashMap::new();
-        manifest_config.insert(
-            "api_key".to_string(),
-            serde_json::json!({"required": true}),
-        );
-        manifest_config.insert(
-            "secret".to_string(),
-            serde_json::json!({"required": true}),
-        );
+        manifest_config.insert("api_key".to_string(), serde_json::json!({"required": true}));
+        manifest_config.insert("secret".to_string(), serde_json::json!({"required": true}));
 
         // Supply only api_key — secret is still missing.
         let mut values = HashMap::new();
@@ -995,7 +989,10 @@ logs  = "/var/log/app"
         assert_eq!(pm.allowed_hosts, vec!["api.example.com", "cdn.example.com"]);
 
         let result = build_extism_manifest(&pm, Path::new("/tmp"), None);
-        let hosts = result.manifest.allowed_hosts.expect("allowed_hosts should be Some");
+        let hosts = result
+            .manifest
+            .allowed_hosts
+            .expect("allowed_hosts should be Some");
         assert_eq!(hosts, vec!["api.example.com", "cdn.example.com"]);
     }
 
@@ -1027,7 +1024,10 @@ logs  = "/var/log/app"
         assert_eq!(pm.allowed_hosts, vec!["httpbin.org", "example.com"]);
 
         let result = build_extism_manifest(&pm, Path::new("/tmp"), None);
-        let hosts = result.manifest.allowed_hosts.expect("allowed_hosts should be Some");
+        let hosts = result
+            .manifest
+            .allowed_hosts
+            .expect("allowed_hosts should be Some");
         assert_eq!(hosts, vec!["httpbin.org", "example.com"]);
     }
 
@@ -1052,35 +1052,59 @@ logs  = "/var/log/app"
     fn wildcard_star_rejected_at_strict_level() {
         let hosts = vec!["*".to_string()];
         let result = validate_allowed_hosts("test-plugin", &hosts, NetworkSecurityLevel::Strict);
-        assert!(result.is_err(), "bare wildcard '*' must be rejected at Strict level");
+        assert!(
+            result.is_err(),
+            "bare wildcard '*' must be rejected at Strict level"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("test-plugin"), "error should name the plugin: {msg}");
-        assert!(msg.contains("*"), "error should include the offending host: {msg}");
-        assert!(msg.contains("Strict"), "error should name the security level: {msg}");
+        assert!(
+            msg.contains("test-plugin"),
+            "error should name the plugin: {msg}"
+        );
+        assert!(
+            msg.contains("*"),
+            "error should include the offending host: {msg}"
+        );
+        assert!(
+            msg.contains("Strict"),
+            "error should name the security level: {msg}"
+        );
     }
 
     #[test]
     fn wildcard_prefix_rejected_at_strict_level() {
         let hosts = vec!["*.example.com".to_string()];
         let result = validate_allowed_hosts("net-plugin", &hosts, NetworkSecurityLevel::Strict);
-        assert!(result.is_err(), "'*.example.com' must be rejected at Strict level");
+        assert!(
+            result.is_err(),
+            "'*.example.com' must be rejected at Strict level"
+        );
     }
 
     #[test]
     fn wildcard_star_rejected_at_paranoid_level() {
         let hosts = vec!["*".to_string()];
         let result = validate_allowed_hosts("test-plugin", &hosts, NetworkSecurityLevel::Paranoid);
-        assert!(result.is_err(), "bare wildcard '*' must be rejected at Paranoid level");
+        assert!(
+            result.is_err(),
+            "bare wildcard '*' must be rejected at Paranoid level"
+        );
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Paranoid"), "error should name the security level: {msg}");
+        assert!(
+            msg.contains("Paranoid"),
+            "error should name the security level: {msg}"
+        );
     }
 
     #[test]
     fn wildcard_prefix_rejected_at_paranoid_level() {
         let hosts = vec!["*.api.io".to_string()];
         let result = validate_allowed_hosts("net-plugin", &hosts, NetworkSecurityLevel::Paranoid);
-        assert!(result.is_err(), "'*.api.io' must be rejected at Paranoid level");
+        assert!(
+            result.is_err(),
+            "'*.api.io' must be rejected at Paranoid level"
+        );
     }
 
     #[test]
@@ -1101,7 +1125,10 @@ logs  = "/var/log/app"
     fn wildcard_hosts_allowed_at_default_level() {
         let hosts = vec!["*.example.com".to_string(), "*".to_string()];
         let result = validate_allowed_hosts("loose-plugin", &hosts, NetworkSecurityLevel::Default);
-        assert!(result.is_ok(), "wildcards should be allowed at Default level");
+        assert!(
+            result.is_ok(),
+            "wildcards should be allowed at Default level"
+        );
     }
 
     // ── US-ZCL-6-3: Wildcard hosts produce warning at default security level ──
@@ -1219,9 +1246,16 @@ logs  = "/var/log/app"
     #[test]
     fn empty_hosts_pass_all_levels() {
         let hosts: Vec<String> = vec![];
-        for level in [NetworkSecurityLevel::Default, NetworkSecurityLevel::Strict, NetworkSecurityLevel::Paranoid] {
+        for level in [
+            NetworkSecurityLevel::Default,
+            NetworkSecurityLevel::Strict,
+            NetworkSecurityLevel::Paranoid,
+        ] {
             let result = validate_allowed_hosts("empty-plugin", &hosts, level);
-            assert!(result.is_ok(), "empty hosts should always pass, failed at {level:?}");
+            assert!(
+                result.is_ok(),
+                "empty hosts should always pass, failed at {level:?}"
+            );
         }
     }
 
@@ -1241,23 +1275,25 @@ logs  = "/var/log/app"
         // Validation runs against the manifest data alone — no WASM, no
         // filesystem, no Extism runtime.  A rejection here proves that the
         // security check can execute before any instantiation work.
-        let result = validate_allowed_hosts(
-            &pm.name,
-            &pm.allowed_hosts,
-            NetworkSecurityLevel::Strict,
-        );
+        let result =
+            validate_allowed_hosts(&pm.name, &pm.allowed_hosts, NetworkSecurityLevel::Strict);
 
-        assert!(result.is_err(), "wildcard host must be rejected at Strict level");
+        assert!(
+            result.is_err(),
+            "wildcard host must be rejected at Strict level"
+        );
         let err = result.unwrap_err();
         match &err {
-            PluginError::WildcardHostRejected { plugin, host, level } => {
+            PluginError::WildcardHostRejected {
+                plugin,
+                host,
+                level,
+            } => {
                 assert_eq!(plugin, "wildcard-plugin");
                 assert_eq!(host, "*.evil.com");
                 assert_eq!(level, "Strict");
             }
-            other => panic!(
-                "expected WildcardHostRejected, got: {other:?}"
-            ),
+            other => panic!("expected WildcardHostRejected, got: {other:?}"),
         }
     }
 
@@ -1296,13 +1332,34 @@ logs  = "/var/log/app"
     /// `NetworkSecurityLevel::from_config` parses config strings correctly.
     #[test]
     fn network_security_level_from_config_strings() {
-        assert_eq!(NetworkSecurityLevel::from_config("default"), NetworkSecurityLevel::Default);
-        assert_eq!(NetworkSecurityLevel::from_config("strict"), NetworkSecurityLevel::Strict);
-        assert_eq!(NetworkSecurityLevel::from_config("Strict"), NetworkSecurityLevel::Strict);
-        assert_eq!(NetworkSecurityLevel::from_config("paranoid"), NetworkSecurityLevel::Paranoid);
-        assert_eq!(NetworkSecurityLevel::from_config("PARANOID"), NetworkSecurityLevel::Paranoid);
-        assert_eq!(NetworkSecurityLevel::from_config("unknown"), NetworkSecurityLevel::Default);
-        assert_eq!(NetworkSecurityLevel::from_config(""), NetworkSecurityLevel::Default);
+        assert_eq!(
+            NetworkSecurityLevel::from_config("default"),
+            NetworkSecurityLevel::Default
+        );
+        assert_eq!(
+            NetworkSecurityLevel::from_config("strict"),
+            NetworkSecurityLevel::Strict
+        );
+        assert_eq!(
+            NetworkSecurityLevel::from_config("Strict"),
+            NetworkSecurityLevel::Strict
+        );
+        assert_eq!(
+            NetworkSecurityLevel::from_config("paranoid"),
+            NetworkSecurityLevel::Paranoid
+        );
+        assert_eq!(
+            NetworkSecurityLevel::from_config("PARANOID"),
+            NetworkSecurityLevel::Paranoid
+        );
+        assert_eq!(
+            NetworkSecurityLevel::from_config("unknown"),
+            NetworkSecurityLevel::Default
+        );
+        assert_eq!(
+            NetworkSecurityLevel::from_config(""),
+            NetworkSecurityLevel::Default
+        );
     }
 
     #[test]
@@ -1321,9 +1378,15 @@ logs  = "/var/log/app"
             "cdn.example.com".to_string(),
         ];
         let result = validate_allowed_hosts("mixed-plugin", &hosts, NetworkSecurityLevel::Strict);
-        assert!(result.is_err(), "mixed list with a wildcard must be rejected at Strict level");
+        assert!(
+            result.is_err(),
+            "mixed list with a wildcard must be rejected at Strict level"
+        );
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("*.internal.io"), "error should name the offending wildcard host: {msg}");
+        assert!(
+            msg.contains("*.internal.io"),
+            "error should name the offending wildcard host: {msg}"
+        );
     }
 
     // ── US-ZCL-6-8: Unit tests for host validation at each security level ──
@@ -1357,7 +1420,11 @@ logs  = "/var/log/app"
         let err = validate_allowed_hosts("star-plugin", &hosts, NetworkSecurityLevel::Strict)
             .expect_err("bare '*' must be rejected at Strict");
         match &err {
-            PluginError::WildcardHostRejected { plugin, host, level } => {
+            PluginError::WildcardHostRejected {
+                plugin,
+                host,
+                level,
+            } => {
                 assert_eq!(plugin, "star-plugin");
                 assert_eq!(host, "*");
                 assert_eq!(level, "Strict");
@@ -1374,7 +1441,11 @@ logs  = "/var/log/app"
         let err = validate_allowed_hosts("prefix-plugin", &hosts, NetworkSecurityLevel::Paranoid)
             .expect_err("'*.example.com' must be rejected at Paranoid");
         match &err {
-            PluginError::WildcardHostRejected { plugin, host, level } => {
+            PluginError::WildcardHostRejected {
+                plugin,
+                host,
+                level,
+            } => {
                 assert_eq!(plugin, "prefix-plugin");
                 assert_eq!(host, "*.example.com");
                 assert_eq!(level, "Paranoid");
@@ -1517,7 +1588,10 @@ logs  = "/var/log/app"
         let loader = PluginLoader::new(&cfg, &security);
 
         let result = loader.plugin_config("nonexistent-plugin");
-        assert!(result.is_empty(), "missing section should yield empty BTreeMap");
+        assert!(
+            result.is_empty(),
+            "missing section should yield empty BTreeMap"
+        );
     }
 
     #[test]
@@ -1531,7 +1605,11 @@ logs  = "/var/log/app"
 
         let result = loader.plugin_config("sorter");
         let keys: Vec<&str> = result.keys().map(String::as_str).collect();
-        assert_eq!(keys, vec!["alpha", "middle", "zebra"], "BTreeMap keys should be sorted");
+        assert_eq!(
+            keys,
+            vec!["alpha", "middle", "zebra"],
+            "BTreeMap keys should be sorted"
+        );
     }
 
     #[test]
@@ -1544,11 +1622,17 @@ logs  = "/var/log/app"
         let loader = PluginLoader::new(&cfg, &security);
 
         assert_eq!(
-            loader.plugin_config("plugin-a").get("key").map(String::as_str),
+            loader
+                .plugin_config("plugin-a")
+                .get("key")
+                .map(String::as_str),
             Some("value-a"),
         );
         assert_eq!(
-            loader.plugin_config("plugin-b").get("key").map(String::as_str),
+            loader
+                .plugin_config("plugin-b")
+                .get("key")
+                .map(String::as_str),
             Some("value-b"),
         );
     }
@@ -1561,13 +1645,23 @@ logs  = "/var/log/app"
         let mut allowed = HashMap::new();
         allowed.insert("/data".to_string(), "/etc/passwd".to_string());
 
-        let forbidden = vec!["/etc".to_string(), "/root".to_string(), "~/.ssh".to_string()];
+        let forbidden = vec![
+            "/etc".to_string(),
+            "/root".to_string(),
+            "~/.ssh".to_string(),
+        ];
         let result = validate_allowed_paths("bad-plugin", &allowed, &forbidden);
         assert!(result.is_err(), "should reject /etc path");
 
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("bad-plugin"), "error should name the plugin: {msg}");
-        assert!(msg.contains("/etc/passwd"), "error should name the path: {msg}");
+        assert!(
+            msg.contains("bad-plugin"),
+            "error should name the plugin: {msg}"
+        );
+        assert!(
+            msg.contains("/etc/passwd"),
+            "error should name the path: {msg}"
+        );
     }
 
     /// /root is rejected as a forbidden path at load time.
@@ -1576,12 +1670,19 @@ logs  = "/var/log/app"
         let mut allowed = HashMap::new();
         allowed.insert("/secrets".to_string(), "/root/.bashrc".to_string());
 
-        let forbidden = vec!["/etc".to_string(), "/root".to_string(), "~/.ssh".to_string()];
+        let forbidden = vec![
+            "/etc".to_string(),
+            "/root".to_string(),
+            "~/.ssh".to_string(),
+        ];
         let result = validate_allowed_paths("bad-plugin", &allowed, &forbidden);
         assert!(result.is_err(), "should reject /root path");
 
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("/root/.bashrc"), "error should name the path: {msg}");
+        assert!(
+            msg.contains("/root/.bashrc"),
+            "error should name the path: {msg}"
+        );
     }
 
     /// ~/.ssh is rejected as a forbidden path at load time (tilde-expanded).
@@ -1590,12 +1691,19 @@ logs  = "/var/log/app"
         let mut allowed = HashMap::new();
         allowed.insert("/keys".to_string(), "~/.ssh/id_rsa".to_string());
 
-        let forbidden = vec!["/etc".to_string(), "/root".to_string(), "~/.ssh".to_string()];
+        let forbidden = vec![
+            "/etc".to_string(),
+            "/root".to_string(),
+            "~/.ssh".to_string(),
+        ];
         let result = validate_allowed_paths("bad-plugin", &allowed, &forbidden);
         assert!(result.is_err(), "should reject ~/.ssh path");
 
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("~/.ssh/id_rsa"), "error should name the path: {msg}");
+        assert!(
+            msg.contains("~/.ssh/id_rsa"),
+            "error should name the path: {msg}"
+        );
     }
 
     /// An exact match against the forbidden path itself is also rejected.
@@ -1615,7 +1723,11 @@ logs  = "/var/log/app"
         let mut allowed = HashMap::new();
         allowed.insert("/data".to_string(), "/workspace/data".to_string());
 
-        let forbidden = vec!["/etc".to_string(), "/root".to_string(), "~/.ssh".to_string()];
+        let forbidden = vec![
+            "/etc".to_string(),
+            "/root".to_string(),
+            "~/.ssh".to_string(),
+        ];
         let result = validate_allowed_paths("good-plugin", &allowed, &forbidden);
         assert!(result.is_ok(), "safe path should be allowed");
     }
@@ -1638,7 +1750,10 @@ logs  = "/var/log/app"
 
         let forbidden = vec!["/etc".to_string()];
         let result = validate_allowed_paths("mixed-plugin", &allowed, &forbidden);
-        assert!(result.is_err(), "should catch the forbidden path among safe ones");
+        assert!(
+            result.is_err(),
+            "should catch the forbidden path among safe ones"
+        );
     }
 
     // ── US-ZCL-9-4: Strict mode rejects paths outside workspace subtree ──
@@ -1655,7 +1770,11 @@ logs  = "/var/log/app"
 
         let err = result.unwrap_err();
         match &err {
-            PluginError::PathOutsideWorkspace { plugin, path, workspace: ws } => {
+            PluginError::PathOutsideWorkspace {
+                plugin,
+                path,
+                workspace: ws,
+            } => {
                 assert_eq!(plugin, "escape-plugin");
                 assert_eq!(path, "/tmp/data");
                 assert_eq!(ws, "/home/user/zeroclaw/workspace");
@@ -1683,7 +1802,10 @@ logs  = "/var/log/app"
 
         let workspace = Path::new("/home/user/workspace");
         let result = validate_workspace_paths("relative-plugin", &allowed, workspace);
-        assert!(result.is_ok(), "relative path resolved against workspace should be allowed");
+        assert!(
+            result.is_ok(),
+            "relative path resolved against workspace should be allowed"
+        );
     }
 
     /// An exact match on the workspace root itself is allowed.
@@ -1694,7 +1816,10 @@ logs  = "/var/log/app"
 
         let workspace = Path::new("/home/user/workspace");
         let result = validate_workspace_paths("root-plugin", &allowed, workspace);
-        assert!(result.is_ok(), "workspace root path itself should be allowed");
+        assert!(
+            result.is_ok(),
+            "workspace root path itself should be allowed"
+        );
     }
 
     /// Empty allowed_paths passes strict workspace validation.
@@ -1703,7 +1828,10 @@ logs  = "/var/log/app"
         let allowed = HashMap::new();
         let workspace = Path::new("/home/user/workspace");
         let result = validate_workspace_paths("empty-plugin", &allowed, workspace);
-        assert!(result.is_ok(), "empty allowed_paths should pass strict validation");
+        assert!(
+            result.is_ok(),
+            "empty allowed_paths should pass strict validation"
+        );
     }
 
     /// Multiple paths where one escapes the workspace — only the escapee is caught.
@@ -1718,7 +1846,10 @@ logs  = "/var/log/app"
         assert!(result.is_err(), "should reject the path outside workspace");
 
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("/var/log/app"), "error should name the offending path: {msg}");
+        assert!(
+            msg.contains("/var/log/app"),
+            "error should name the offending path: {msg}"
+        );
     }
 
     /// A path that shares a prefix with the workspace but is not a subtree
@@ -1726,7 +1857,10 @@ logs  = "/var/log/app"
     #[test]
     fn strict_mode_rejects_sibling_directory_with_shared_prefix() {
         let mut allowed = HashMap::new();
-        allowed.insert("/data".to_string(), "/home/user/workspace-other/data".to_string());
+        allowed.insert(
+            "/data".to_string(),
+            "/home/user/workspace-other/data".to_string(),
+        );
 
         let workspace = Path::new("/home/user/workspace");
         let result = validate_workspace_paths("sibling-plugin", &allowed, workspace);
@@ -1754,8 +1888,7 @@ logs  = "/var/log/app"
         // Create a symlink *inside* the workspace that points outside.
         let symlink_path = workspace_dir.path().join("escape-link");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside_target, &symlink_path)
-            .expect("create symlink");
+        std::os::unix::fs::symlink(&outside_target, &symlink_path).expect("create symlink");
 
         let mut allowed = HashMap::new();
         allowed.insert(
@@ -1763,8 +1896,7 @@ logs  = "/var/log/app"
             symlink_path.to_string_lossy().into_owned(),
         );
 
-        let result =
-            validate_workspace_paths("symlink-plugin", &allowed, workspace_dir.path());
+        let result = validate_workspace_paths("symlink-plugin", &allowed, workspace_dir.path());
         assert!(
             result.is_err(),
             "symlink resolving outside workspace must be rejected"
@@ -1792,8 +1924,7 @@ logs  = "/var/log/app"
         // Create a symlink that points to the real directory (still inside workspace).
         let symlink_path = workspace_dir.path().join("link-to-real");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&real_dir, &symlink_path)
-            .expect("create symlink");
+        std::os::unix::fs::symlink(&real_dir, &symlink_path).expect("create symlink");
 
         let mut allowed = HashMap::new();
         allowed.insert(

@@ -1,9 +1,9 @@
 //! Bridge between WASM plugins and the Tool trait.
 
-use crate::tools::traits::RiskLevel;
 use crate::security::audit::{AuditLogger, HttpRequestEntry, PluginExecutionLog};
 use crate::security::policy::{SecurityPolicy, ToolOperation};
 use crate::security::redact_sensitive_params;
+use crate::tools::traits::RiskLevel;
 use crate::tools::traits::{Tool, ToolResult};
 use async_trait::async_trait;
 use extism::Plugin;
@@ -233,7 +233,10 @@ fn classify_extism_error(msg: &str) -> &'static str {
     }
 
     // Missing export / function not found
-    if lower.contains("not found") || lower.contains("unknown export") || lower.contains("missing export") {
+    if lower.contains("not found")
+        || lower.contains("unknown export")
+        || lower.contains("missing export")
+    {
         return "export function not found";
     }
 
@@ -325,7 +328,10 @@ mod tests {
 
         assert_eq!(tool.name(), "db_query");
         assert_eq!(tool.description(), "test tool");
-        assert_eq!(tool.parameters_schema(), serde_json::json!({ "type": "object" }));
+        assert_eq!(
+            tool.parameters_schema(),
+            serde_json::json!({ "type": "object" })
+        );
     }
 
     // --- Error-mapping tests (US-ZCL-3-3) ---

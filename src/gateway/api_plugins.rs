@@ -100,12 +100,7 @@ pub mod plugin_routes {
             return Err((StatusCode::NOT_FOUND, "Plugin not found"));
         }
         crate::plugins::host::PluginHost::new(plugin_path.parent().unwrap_or(&plugin_path))
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to load plugins",
-                )
-            })
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load plugins"))
     }
 
     /// `POST /api/plugins/:name/enable` — enable a disabled plugin.
@@ -209,7 +204,10 @@ pub mod plugin_routes {
             }
 
             if let Err(_) = host.disable_plugin(&name) {
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to disable plugin")
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to disable plugin",
+                )
                     .into_response();
             }
 
@@ -281,7 +279,11 @@ pub mod plugin_routes {
             for key in body.keys() {
                 if let Some(decl) = info.config.get(key) {
                     if let Some(obj) = decl.as_object() {
-                        if obj.get("sensitive").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        if obj
+                            .get("sensitive")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        {
                             return (
                                 StatusCode::BAD_REQUEST,
                                 "Cannot edit sensitive config keys via API",
@@ -295,11 +297,7 @@ pub mod plugin_routes {
             // Update per-plugin config in the main config
             {
                 let mut config = state.config.lock();
-                let plugin_cfg = config
-                    .plugins
-                    .per_plugin
-                    .entry(name.clone())
-                    .or_default();
+                let plugin_cfg = config.plugins.per_plugin.entry(name.clone()).or_default();
                 for (k, v) in &body {
                     plugin_cfg.insert(k.clone(), v.clone());
                 }
@@ -312,11 +310,7 @@ pub mod plugin_routes {
         // Now safe to .await — no MutexGuard in scope.
         if let Err(e) = config_snapshot.save().await {
             tracing::error!(error = %e, "failed to persist plugin config to config.toml");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to save config",
-            )
-                .into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save config").into_response();
         }
 
         Json(serde_json::json!({ "status": "ok" })).into_response()

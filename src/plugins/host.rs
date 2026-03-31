@@ -133,7 +133,11 @@ impl PluginHost {
             if path.is_dir() {
                 let manifest_path = {
                     let m = path.join("manifest.toml");
-                    if m.exists() { m } else { path.join("plugin.toml") }
+                    if m.exists() {
+                        m
+                    } else {
+                        path.join("plugin.toml")
+                    }
                 };
                 if manifest_path.exists() {
                     if let Ok(manifest) = self.load_manifest(&manifest_path) {
@@ -154,7 +158,9 @@ impl PluginHost {
                                 // installs.
                                 let sidecar = wasm_path.with_extension("wasm.sha256");
                                 let wasm_sha256 = if sidecar.exists() {
-                                    std::fs::read_to_string(&sidecar).ok().map(|s| s.trim().to_string())
+                                    std::fs::read_to_string(&sidecar)
+                                        .ok()
+                                        .map(|s| s.trim().to_string())
                                 } else if wasm_path.exists() {
                                     Self::compute_wasm_hash(&wasm_path).ok()
                                 } else {
@@ -441,11 +447,7 @@ impl PluginHost {
             .values()
             .filter(|p| p.manifest.capabilities.contains(&PluginCapability::Tool))
             .map(|p| {
-                let plugin_dir = p
-                    .wasm_path
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .to_path_buf();
+                let plugin_dir = p.wasm_path.parent().unwrap_or(Path::new(".")).to_path_buf();
                 (&p.manifest, plugin_dir)
             })
             .collect()
@@ -464,14 +466,12 @@ impl PluginHost {
     ///
     /// Returns a `ReloadSummary` describing what changed.
     pub fn reload(&mut self) -> Result<ReloadSummary, PluginError> {
-        let before_names: std::collections::HashSet<String> =
-            self.loaded.keys().cloned().collect();
+        let before_names: std::collections::HashSet<String> = self.loaded.keys().cloned().collect();
 
         self.loaded.clear();
         let discover_result = self.discover();
 
-        let after_names: std::collections::HashSet<String> =
-            self.loaded.keys().cloned().collect();
+        let after_names: std::collections::HashSet<String> = self.loaded.keys().cloned().collect();
 
         let loaded = after_names.difference(&before_names).cloned().collect();
         let unloaded = before_names.difference(&after_names).cloned().collect();
@@ -618,12 +618,10 @@ impl PluginHost {
             let has_wildcard_hosts = manifest.allowed_hosts.iter().any(|h| h.contains('*'));
             let has_forbidden_paths = manifest.allowed_paths.values().any(|p| {
                 let expanded = super::loader::expand_user_path(p);
-                super::loader::FORBIDDEN_PATHS
-                    .iter()
-                    .any(|forbidden| {
-                        let forbidden_expanded = super::loader::expand_user_path(forbidden);
-                        expanded.starts_with(&forbidden_expanded)
-                    })
+                super::loader::FORBIDDEN_PATHS.iter().any(|forbidden| {
+                    let forbidden_expanded = super::loader::expand_user_path(forbidden);
+                    expanded.starts_with(&forbidden_expanded)
+                })
             });
 
             if has_wildcard_hosts && has_forbidden_paths {
@@ -947,7 +945,9 @@ permissions = ["memory_read", "memory_write"]
         assert_eq!(plugins.len(), 3);
 
         // Verify each plugin was parsed correctly
-        let alpha = host.get_plugin("alpha").expect("alpha should be discovered");
+        let alpha = host
+            .get_plugin("alpha")
+            .expect("alpha should be discovered");
         assert_eq!(alpha.version, "1.2.3");
         assert_eq!(alpha.description.as_deref(), Some("Alpha tool plugin"));
         assert_eq!(alpha.capabilities, vec![PluginCapability::Tool]);
@@ -963,7 +963,9 @@ permissions = ["memory_read", "memory_write"]
         assert_eq!(beta.capabilities, vec![PluginCapability::Channel]);
         assert!(beta.permissions.is_empty());
 
-        let gamma = host.get_plugin("gamma").expect("gamma should be discovered");
+        let gamma = host
+            .get_plugin("gamma")
+            .expect("gamma should be discovered");
         assert_eq!(gamma.version, "2.0.0");
         assert_eq!(
             gamma.capabilities,
@@ -1004,14 +1006,25 @@ capabilities = ["tool"]
 
         // Re-discover by creating a new host (simulates reload)
         let host2 = PluginHost::new(dir.path()).unwrap();
-        let info2 = host2.get_plugin("hash-reload").expect("plugin should exist after reload");
-        let new_hash = info2.wasm_sha256.clone().expect("hash should be recorded after reload");
+        let info2 = host2
+            .get_plugin("hash-reload")
+            .expect("plugin should exist after reload");
+        let new_hash = info2
+            .wasm_sha256
+            .clone()
+            .expect("hash should be recorded after reload");
 
-        assert_ne!(original_hash, new_hash, "hash must change when WASM binary changes");
+        assert_ne!(
+            original_hash, new_hash,
+            "hash must change when WASM binary changes"
+        );
 
         // Verify the new hash matches the actual file content
         let expected = PluginHost::compute_wasm_hash(&plugin_dir.join("plugin.wasm")).unwrap();
-        assert_eq!(new_hash, expected, "hash should match freshly computed value");
+        assert_eq!(
+            new_hash, expected,
+            "hash should match freshly computed value"
+        );
     }
 
     #[test]
@@ -1059,12 +1072,18 @@ capabilities = ["tool"]
             .clone()
             .expect("hash should be set after reinstall");
 
-        assert_ne!(hash_v1, hash_v2, "hash must differ after reinstall with new binary");
+        assert_ne!(
+            hash_v1, hash_v2,
+            "hash must differ after reinstall with new binary"
+        );
 
         // Verify v2 hash is correct
         let installed_wasm = plugins_base.join("reinstallable").join("plugin.wasm");
         let expected = PluginHost::compute_wasm_hash(&installed_wasm).unwrap();
-        assert_eq!(hash_v2, expected, "reinstall hash should match computed value");
+        assert_eq!(
+            hash_v2, expected,
+            "reinstall hash should match computed value"
+        );
     }
 
     #[test]
@@ -1093,10 +1112,11 @@ capabilities = ["tool"]
         host.install(source_dir.to_str().unwrap()).unwrap();
 
         // The .sha256 sidecar file must exist alongside the installed WASM binary.
-        let hash_file = plugins_base
-            .join("sidecar-test")
-            .join("plugin.wasm.sha256");
-        assert!(hash_file.exists(), ".wasm.sha256 sidecar file must be created at install time");
+        let hash_file = plugins_base.join("sidecar-test").join("plugin.wasm.sha256");
+        assert!(
+            hash_file.exists(),
+            ".wasm.sha256 sidecar file must be created at install time"
+        );
 
         // Its contents must match the in-memory hash.
         let file_hash = std::fs::read_to_string(&hash_file).unwrap();
@@ -1105,7 +1125,10 @@ capabilities = ["tool"]
             .unwrap()
             .wasm_sha256
             .expect("hash should be set");
-        assert_eq!(file_hash, mem_hash, "sidecar file must contain the same hash as metadata");
+        assert_eq!(
+            file_hash, mem_hash,
+            "sidecar file must contain the same hash as metadata"
+        );
     }
 
     #[test]
@@ -1131,8 +1154,13 @@ capabilities = ["tool"]
         let host = PluginHost::new(dir.path()).unwrap();
 
         // Sanity: hash was recorded and integrity passes before tampering.
-        let info = host.get_plugin("tampered").expect("plugin should be discovered");
-        assert!(info.wasm_sha256.is_some(), "hash must be recorded at discovery time");
+        let info = host
+            .get_plugin("tampered")
+            .expect("plugin should be discovered");
+        assert!(
+            info.wasm_sha256.is_some(),
+            "hash must be recorded at discovery time"
+        );
         host.verify_wasm_integrity("tampered")
             .expect("integrity check should pass on unmodified binary");
 
@@ -1145,10 +1173,22 @@ capabilities = ["tool"]
             .expect_err("integrity check must fail after tampering");
 
         let msg = err.to_string();
-        assert!(msg.contains("integrity check failed"), "error should mention integrity failure: {msg}");
-        assert!(msg.contains("tampered"), "error should name the plugin: {msg}");
-        assert!(msg.contains("expected hash"), "error should include expected hash: {msg}");
-        assert!(msg.contains("got"), "error should include actual hash: {msg}");
+        assert!(
+            msg.contains("integrity check failed"),
+            "error should mention integrity failure: {msg}"
+        );
+        assert!(
+            msg.contains("tampered"),
+            "error should name the plugin: {msg}"
+        );
+        assert!(
+            msg.contains("expected hash"),
+            "error should include expected hash: {msg}"
+        );
+        assert!(
+            msg.contains("got"),
+            "error should include actual hash: {msg}"
+        );
     }
 
     #[test]
@@ -1170,8 +1210,13 @@ capabilities = ["tool"]
         // Deliberately do NOT create plugin.wasm
 
         let host = PluginHost::new(dir.path()).unwrap();
-        let info = host.get_plugin("no-wasm").expect("plugin should be discovered");
-        assert!(info.wasm_sha256.is_none(), "no hash when WASM file is absent");
+        let info = host
+            .get_plugin("no-wasm")
+            .expect("plugin should be discovered");
+        assert!(
+            info.wasm_sha256.is_none(),
+            "no hash when WASM file is absent"
+        );
 
         // No hash means no mismatch — verify passes.
         host.verify_wasm_integrity("no-wasm")
@@ -1421,7 +1466,11 @@ capabilities = ["channel"]
         let diagnostics = host.doctor();
 
         // doctor() must return a diagnostic for every plugin directory
-        assert_eq!(diagnostics.len(), 3, "doctor() must check all 3 installed plugins");
+        assert_eq!(
+            diagnostics.len(),
+            3,
+            "doctor() must check all 3 installed plugins"
+        );
 
         // Results are sorted by name
         assert_eq!(diagnostics[0].plugin_name, "alpha");
@@ -1429,7 +1478,11 @@ capabilities = ["channel"]
         assert_eq!(diagnostics[2].plugin_name, "gamma");
 
         // Alpha should be at worst Warn (valid manifest + WASM exists, but no hash sidecar)
-        assert_ne!(diagnostics[0].overall(), DiagStatus::Fail, "alpha should not fail");
+        assert_ne!(
+            diagnostics[0].overall(),
+            DiagStatus::Fail,
+            "alpha should not fail"
+        );
 
         // Beta should fail (missing WASM file)
         assert!(
@@ -1494,7 +1547,11 @@ required = false
             .expect("diagnose_plugin must produce a config check");
 
         // It should be a warning (required keys declared but not verified at runtime)
-        assert_eq!(config_check.status, DiagStatus::Warn, "missing required config keys should warn");
+        assert_eq!(
+            config_check.status,
+            DiagStatus::Warn,
+            "missing required config keys should warn"
+        );
 
         // The message must include both key names
         assert!(
@@ -1597,31 +1654,78 @@ workspace = "/tmp/plugin-data"
 
         // Plugin A: wildcard hosts → Warn
         let diag_a = host.diagnose_plugin(&plugin_a);
-        let cap_a = diag_a.checks.iter().find(|c| c.name == "capabilities")
+        let cap_a = diag_a
+            .checks
+            .iter()
+            .find(|c| c.name == "capabilities")
             .expect("must produce a capabilities check");
-        assert_eq!(cap_a.status, DiagStatus::Warn, "wildcard hosts should warn: {}", cap_a.message);
-        assert!(cap_a.message.contains("wildcard"), "message must mention wildcard: {}", cap_a.message);
+        assert_eq!(
+            cap_a.status,
+            DiagStatus::Warn,
+            "wildcard hosts should warn: {}",
+            cap_a.message
+        );
+        assert!(
+            cap_a.message.contains("wildcard"),
+            "message must mention wildcard: {}",
+            cap_a.message
+        );
 
         // Plugin B: forbidden path → Fail
         let diag_b = host.diagnose_plugin(&plugin_b);
-        let cap_b = diag_b.checks.iter().find(|c| c.name == "capabilities")
+        let cap_b = diag_b
+            .checks
+            .iter()
+            .find(|c| c.name == "capabilities")
             .expect("must produce a capabilities check");
-        assert_eq!(cap_b.status, DiagStatus::Fail, "forbidden paths should fail: {}", cap_b.message);
-        assert!(cap_b.message.contains("forbidden"), "message must mention forbidden: {}", cap_b.message);
+        assert_eq!(
+            cap_b.status,
+            DiagStatus::Fail,
+            "forbidden paths should fail: {}",
+            cap_b.message
+        );
+        assert!(
+            cap_b.message.contains("forbidden"),
+            "message must mention forbidden: {}",
+            cap_b.message
+        );
 
         // Plugin C: both wildcard + forbidden → Fail
         let diag_c = host.diagnose_plugin(&plugin_c);
-        let cap_c = diag_c.checks.iter().find(|c| c.name == "capabilities")
+        let cap_c = diag_c
+            .checks
+            .iter()
+            .find(|c| c.name == "capabilities")
             .expect("must produce a capabilities check");
-        assert_eq!(cap_c.status, DiagStatus::Fail, "both bad should fail: {}", cap_c.message);
-        assert!(cap_c.message.contains("wildcard") && cap_c.message.contains("forbidden"),
-            "message must mention both wildcard and forbidden: {}", cap_c.message);
+        assert_eq!(
+            cap_c.status,
+            DiagStatus::Fail,
+            "both bad should fail: {}",
+            cap_c.message
+        );
+        assert!(
+            cap_c.message.contains("wildcard") && cap_c.message.contains("forbidden"),
+            "message must mention both wildcard and forbidden: {}",
+            cap_c.message
+        );
 
         // Plugin D: clean → Pass
         let diag_d = host.diagnose_plugin(&plugin_d);
-        let cap_d = diag_d.checks.iter().find(|c| c.name == "capabilities")
+        let cap_d = diag_d
+            .checks
+            .iter()
+            .find(|c| c.name == "capabilities")
             .expect("must produce a capabilities check");
-        assert_eq!(cap_d.status, DiagStatus::Pass, "clean plugin should pass: {}", cap_d.message);
-        assert!(cap_d.message.contains("no capability conflicts"), "message: {}", cap_d.message);
+        assert_eq!(
+            cap_d.status,
+            DiagStatus::Pass,
+            "clean plugin should pass: {}",
+            cap_d.message
+        );
+        assert!(
+            cap_d.message.contains("no capability conflicts"),
+            "message: {}",
+            cap_d.message
+        );
     }
 }
