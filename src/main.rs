@@ -1680,13 +1680,12 @@ async fn main() -> Result<()> {
                         manifest_path.display()
                     )
                 })?;
-                let manifest =
-                    zeroclaw::plugins::PluginManifest::parse(&content).map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to parse manifest at {}: {e}",
-                            manifest_path.display()
-                        )
-                    })?;
+                let manifest = zeroclaw::plugins::PluginManifest::parse(&content).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to parse manifest at {}: {e}",
+                        manifest_path.display()
+                    )
+                })?;
                 zeroclaw::plugins::display_audit(&manifest);
                 Ok(())
             }

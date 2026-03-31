@@ -1047,35 +1047,31 @@ pub fn all_tools_with_runtime(
                         // Resolve per-plugin config; skip this plugin if
                         // required config keys are missing.
                         // Decrypt any encrypted values before resolution.
-                        let per_plugin_values = match root_config
-                            .plugins
-                            .per_plugin
-                            .get(&manifest.name)
-                            .cloned()
-                        {
-                            Some(mut vals) => {
-                                let config_dir = root_config
-                                    .config_path
-                                    .parent()
-                                    .unwrap_or(std::path::Path::new("."));
-                                let store = crate::security::SecretStore::new(
-                                    config_dir,
-                                    root_config.secrets.encrypt,
-                                );
-                                if let Err(e) =
-                                    crate::plugins::decrypt_plugin_config_values(&mut vals, &store)
-                                {
-                                    tracing::warn!(
-                                        plugin = manifest.name,
-                                        error = %e,
-                                        "Skipping plugin with undecryptable config"
+                        let per_plugin_values =
+                            match root_config.plugins.per_plugin.get(&manifest.name).cloned() {
+                                Some(mut vals) => {
+                                    let config_dir = root_config
+                                        .config_path
+                                        .parent()
+                                        .unwrap_or(std::path::Path::new("."));
+                                    let store = crate::security::SecretStore::new(
+                                        config_dir,
+                                        root_config.secrets.encrypt,
                                     );
-                                    continue;
+                                    if let Err(e) = crate::plugins::decrypt_plugin_config_values(
+                                        &mut vals, &store,
+                                    ) {
+                                        tracing::warn!(
+                                            plugin = manifest.name,
+                                            error = %e,
+                                            "Skipping plugin with undecryptable config"
+                                        );
+                                        continue;
+                                    }
+                                    Some(vals)
                                 }
-                                Some(vals)
-                            }
-                            None => None,
-                        };
+                                None => None,
+                            };
                         let resolved_config = match crate::plugins::resolve_plugin_config(
                             &manifest.name,
                             &manifest.config,
@@ -1151,13 +1147,11 @@ pub fn all_tools_with_runtime(
                             crate::plugins::loader::NetworkSecurityLevel::Strict
                                 | crate::plugins::loader::NetworkSecurityLevel::Paranoid
                         ) {
-                            if let Err(e) =
-                                crate::plugins::loader::validate_workspace_paths(
-                                    &manifest.name,
-                                    &manifest.allowed_paths,
-                                    &root_config.workspace_dir,
-                                )
-                            {
+                            if let Err(e) = crate::plugins::loader::validate_workspace_paths(
+                                &manifest.name,
+                                &manifest.allowed_paths,
+                                &root_config.workspace_dir,
+                            ) {
                                 tracing::warn!(
                                     plugin = manifest.name,
                                     error = %e,
@@ -1206,29 +1200,27 @@ pub fn all_tools_with_runtime(
                                 if manifest.tools.is_empty() {
                                     // Legacy fallback: plugin declares no
                                     // [[tools]], expose a single "call" export.
-                                    let mut wasm_tool =
-                                        crate::plugins::wasm_tool::WasmTool::new(
-                                            manifest.name.clone(),
-                                            manifest.description.clone().unwrap_or_default(),
-                                            manifest.name.clone(),
-                                            manifest.version.clone(),
-                                            "call".to_string(),
-                                            serde_json::json!({
-                                                "type": "object",
-                                                "properties": {
-                                                    "input": {
-                                                        "type": "string",
-                                                        "description": "Input for the plugin"
-                                                    }
-                                                },
-                                                "required": ["input"]
-                                            }),
-                                            std::sync::Arc::clone(&shared_plugin),
-                                        );
+                                    let mut wasm_tool = crate::plugins::wasm_tool::WasmTool::new(
+                                        manifest.name.clone(),
+                                        manifest.description.clone().unwrap_or_default(),
+                                        manifest.name.clone(),
+                                        manifest.version.clone(),
+                                        "call".to_string(),
+                                        serde_json::json!({
+                                            "type": "object",
+                                            "properties": {
+                                                "input": {
+                                                    "type": "string",
+                                                    "description": "Input for the plugin"
+                                                }
+                                            },
+                                            "required": ["input"]
+                                        }),
+                                        std::sync::Arc::clone(&shared_plugin),
+                                    );
                                     if let Some(ref logger) = forced_audit_logger {
-                                        wasm_tool = wasm_tool.with_audit_logger(
-                                            std::sync::Arc::clone(logger),
-                                        );
+                                        wasm_tool = wasm_tool
+                                            .with_audit_logger(std::sync::Arc::clone(logger));
                                     }
                                     tool_arcs.push(Arc::new(wasm_tool));
                                     tool_count += 1;
@@ -1236,12 +1228,10 @@ pub fn all_tools_with_runtime(
                                     // Each [[tools]] entry becomes a WasmTool
                                     // sharing the same Extism instance.
                                     for tool_def in &manifest.tools {
-                                        let schema = tool_def
-                                            .parameters_schema
-                                            .clone()
-                                            .unwrap_or_else(|| {
-                                                serde_json::json!({ "type": "object" })
-                                            });
+                                        let schema =
+                                            tool_def.parameters_schema.clone().unwrap_or_else(
+                                                || serde_json::json!({ "type": "object" }),
+                                            );
                                         let mut wasm_tool =
                                             crate::plugins::wasm_tool::WasmTool::new(
                                                 tool_def.name.clone(),
@@ -1253,9 +1243,8 @@ pub fn all_tools_with_runtime(
                                                 std::sync::Arc::clone(&shared_plugin),
                                             );
                                         if let Some(ref logger) = forced_audit_logger {
-                                            wasm_tool = wasm_tool.with_audit_logger(
-                                                std::sync::Arc::clone(logger),
-                                            );
+                                            wasm_tool = wasm_tool
+                                                .with_audit_logger(std::sync::Arc::clone(logger));
                                         }
                                         tool_arcs.push(Arc::new(wasm_tool));
                                         tool_count += 1;
@@ -1933,8 +1922,7 @@ risk_level = "low"
         );
 
         // Convert to ToolSpec — the same path used by the gateway's /api/tools
-        let specs: Vec<crate::tools::traits::ToolSpec> =
-            tools.iter().map(|t| t.spec()).collect();
+        let specs: Vec<crate::tools::traits::ToolSpec> = tools.iter().map(|t| t.spec()).collect();
 
         // Verify the plugin tool appears in the spec list
         let plugin_spec = specs
@@ -2197,8 +2185,7 @@ description = "Arbitrary JSON payload to echo"
             "echo_message 'message' param must be string type"
         );
         assert_eq!(
-            msg_schema["properties"]["message"]["description"],
-            "The message to echo",
+            msg_schema["properties"]["message"]["description"], "The message to echo",
             "echo_message 'message' param description must match manifest"
         );
 
@@ -2236,8 +2223,7 @@ description = "Arbitrary JSON payload to echo"
         assert_eq!(echo_json_count, 1, "echo_json must appear exactly once");
 
         // ── Verify ToolSpec round-trip (same path as `zeroclaw tools list`) ──
-        let specs: Vec<crate::tools::traits::ToolSpec> =
-            tools.iter().map(|t| t.spec()).collect();
+        let specs: Vec<crate::tools::traits::ToolSpec> = tools.iter().map(|t| t.spec()).collect();
 
         let msg_spec = specs
             .iter()

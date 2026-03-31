@@ -70,10 +70,7 @@ pub enum PluginError {
     PluginNotAllowlisted { plugin: String },
 
     #[error("failed to decrypt config key '{key}': {source}")]
-    ConfigDecrypt {
-        key: String,
-        source: anyhow::Error,
-    },
+    ConfigDecrypt { key: String, source: anyhow::Error },
 
     #[error("WASM binary integrity check failed for plugin '{plugin}': expected hash {expected}, got {actual}")]
     HashMismatch {

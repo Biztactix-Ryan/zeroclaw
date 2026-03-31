@@ -393,7 +393,10 @@ impl AuditLogger {
     pub fn log_plugin_execution(&self, entry: PluginExecutionLog<'_>) -> Result<()> {
         let mut event = AuditEvent::new(AuditEventType::PluginExecution)
             .with_action(
-                format!("{}@{}:{}", entry.plugin_name, entry.plugin_version, entry.tool_name),
+                format!(
+                    "{}@{}:{}",
+                    entry.plugin_name, entry.plugin_version, entry.tool_name
+                ),
                 "low".to_string(),
                 true,
                 true,

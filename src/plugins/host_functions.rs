@@ -23,8 +23,8 @@
 use crate::channels::traits::{Channel, SendMessage};
 use crate::memory::traits::{Memory, MemoryCategory};
 use crate::plugins::PluginManifest;
-use crate::tools::traits::RiskLevel;
 use crate::security::audit::AuditLogger;
+use crate::tools::traits::RiskLevel;
 use crate::tools::traits::Tool;
 use extism::Function;
 use extism::UserData;
@@ -447,7 +447,10 @@ impl HostFunctionRegistry {
     /// A plugin that declares no host capabilities receives an empty vector —
     /// meaning no host-function imports are available to it at all.
     pub fn build_functions(&self, manifest: &PluginManifest) -> Vec<Function> {
-        self.build_functions_for_level(manifest, crate::plugins::loader::NetworkSecurityLevel::Default)
+        self.build_functions_for_level(
+            manifest,
+            crate::plugins::loader::NetworkSecurityLevel::Default,
+        )
     }
 
     /// Build host functions with security-level enforcement.
@@ -501,9 +504,7 @@ impl HostFunctionRegistry {
                 msg.allowed_channels.clone(),
                 limiter,
             ));
-            fns.push(self.make_zeroclaw_get_channels_fn(
-                msg.allowed_channels.clone(),
-            ));
+            fns.push(self.make_zeroclaw_get_channels_fn(msg.allowed_channels.clone()));
         }
 
         // Context — up to 3 functions (session / user_identity / agent_config).
@@ -553,20 +554,19 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 // Read JSON input from shared memory
                 let input_bytes: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
-                let request: MemoryStoreRequest = serde_json::from_slice(&input_bytes)
-                    .map_err(|e| extism::Error::msg(format!(
-                        "invalid zeroclaw_memory_store input: {e}"
-                    )))?;
+                let request: MemoryStoreRequest =
+                    serde_json::from_slice(&input_bytes).map_err(|e| {
+                        extism::Error::msg(format!("invalid zeroclaw_memory_store input: {e}"))
+                    })?;
 
                 // Tag the key with the plugin name as author
-                let tagged_key =
-                    HostFunctionRegistry::tagged_key(&data.plugin_name, &request.key);
+                let tagged_key = HostFunctionRegistry::tagged_key(&data.plugin_name, &request.key);
 
                 // Bridge async Memory::store to sync host function callback.
                 // Spawn a blocking thread to avoid nested-runtime panics.
@@ -616,25 +616,24 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 // Read JSON input from shared memory
                 let input_bytes: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
-                let request: MemoryRecallRequest = serde_json::from_slice(&input_bytes)
-                    .map_err(|e| extism::Error::msg(format!(
-                        "invalid zeroclaw_memory_recall input: {e}"
-                    )))?;
+                let request: MemoryRecallRequest =
+                    serde_json::from_slice(&input_bytes).map_err(|e| {
+                        extism::Error::msg(format!("invalid zeroclaw_memory_recall input: {e}"))
+                    })?;
 
                 // Bridge async Memory::recall to sync host function callback.
                 let memory = data.memory.clone();
                 let query = request.query;
                 let result = std::thread::scope(|s| {
                     s.spawn(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            memory.recall(&query, 10, None, None, None),
-                        )
+                        tokio::runtime::Handle::current()
+                            .block_on(memory.recall(&query, 10, None, None, None))
                     })
                     .join()
                     .expect("memory recall thread panicked")
@@ -645,8 +644,10 @@ impl HostFunctionRegistry {
                     Ok(entries) => {
                         let results_json = serde_json::to_string(&entries)
                             .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
-                        serde_json::to_vec(&MemoryRecallResponse { results: results_json })
-                            .expect("MemoryRecallResponse serialization is infallible")
+                        serde_json::to_vec(&MemoryRecallResponse {
+                            results: results_json,
+                        })
+                        .expect("MemoryRecallResponse serialization is infallible")
                     }
                     Err(e) => HostFunctionError::new(e.to_string()).to_json_bytes(),
                 };
@@ -679,20 +680,19 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 // Read JSON input from shared memory
                 let input_bytes: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
-                let request: MemoryForgetRequest = serde_json::from_slice(&input_bytes)
-                    .map_err(|e| extism::Error::msg(format!(
-                        "invalid zeroclaw_memory_forget input: {e}"
-                    )))?;
+                let request: MemoryForgetRequest =
+                    serde_json::from_slice(&input_bytes).map_err(|e| {
+                        extism::Error::msg(format!("invalid zeroclaw_memory_forget input: {e}"))
+                    })?;
 
                 // Tag the key with the plugin name as author
-                let tagged_key =
-                    HostFunctionRegistry::tagged_key(&data.plugin_name, &request.key);
+                let tagged_key = HostFunctionRegistry::tagged_key(&data.plugin_name, &request.key);
 
                 // Bridge async Memory::forget to sync host function callback.
                 let memory = data.memory.clone();
@@ -747,16 +747,16 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 // Read JSON input from shared memory
                 let input_bytes: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
-                let request: ToolCallRequest = serde_json::from_slice(&input_bytes)
-                    .map_err(|e| extism::Error::msg(format!(
-                        "invalid zeroclaw_tool_call input: {e}"
-                    )))?;
+                let request: ToolCallRequest =
+                    serde_json::from_slice(&input_bytes).map_err(|e| {
+                        extism::Error::msg(format!("invalid zeroclaw_tool_call input: {e}"))
+                    })?;
 
                 // Enforce call-depth limit to prevent infinite recursion
                 // (e.g. plugin A → tool_call → plugin B → tool_call → plugin A …)
@@ -772,7 +772,11 @@ impl HostFunctionRegistry {
                 }
 
                 // Validate that the tool is in the allowed list
-                if !data.allowed_tools.iter().any(|t| t == "*" || t == &request.tool_name) {
+                if !data
+                    .allowed_tools
+                    .iter()
+                    .any(|t| t == "*" || t == &request.tool_name)
+                {
                     let err = HostFunctionError::new(format!(
                         "[plugin:{}/zeroclaw_tool_call] tool '{}' is not in allowed_tools",
                         data.plugin_name, request.tool_name
@@ -812,23 +816,19 @@ impl HostFunctionRegistry {
                 // Bridge async Tool::execute to sync host function callback.
                 let args = request.arguments;
                 let result = std::thread::scope(|s| {
-                    s.spawn(|| {
-                        tokio::runtime::Handle::current().block_on(tool.execute(args))
-                    })
-                    .join()
-                    .expect("tool call thread panicked")
+                    s.spawn(|| tokio::runtime::Handle::current().block_on(tool.execute(args)))
+                        .join()
+                        .expect("tool call thread panicked")
                 });
 
                 // Encode response as JSON and write to shared memory
                 let response_bytes = match result {
-                    Ok(tool_result) => {
-                        serde_json::to_vec(&ToolCallResponse {
-                            success: tool_result.success,
-                            output: tool_result.output,
-                            error: tool_result.error,
-                        })
-                        .expect("ToolCallResponse serialization is infallible")
-                    }
+                    Ok(tool_result) => serde_json::to_vec(&ToolCallResponse {
+                        success: tool_result.success,
+                        output: tool_result.output,
+                        error: tool_result.error,
+                    })
+                    .expect("ToolCallResponse serialization is infallible"),
                     Err(e) => HostFunctionError::new(format!(
                         "[plugin:{}/zeroclaw_tool_call] execution error: {e}",
                         data.plugin_name
@@ -871,19 +871,23 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 // Read JSON input from shared memory
                 let input_bytes: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
-                let request: ChannelSendRequest = serde_json::from_slice(&input_bytes)
-                    .map_err(|e| extism::Error::msg(format!(
-                        "invalid zeroclaw_send_message input: {e}"
-                    )))?;
+                let request: ChannelSendRequest =
+                    serde_json::from_slice(&input_bytes).map_err(|e| {
+                        extism::Error::msg(format!("invalid zeroclaw_send_message input: {e}"))
+                    })?;
 
                 // Validate that the channel is in the allowed list
-                if !data.allowed_channels.iter().any(|c| c == "*" || c == &request.channel) {
+                if !data
+                    .allowed_channels
+                    .iter()
+                    .any(|c| c == "*" || c == &request.channel)
+                {
                     let err = HostFunctionError::new(format!(
                         "[plugin:{}/zeroclaw_send_message] channel '{}' is not in allowed_channels",
                         data.plugin_name, request.channel
@@ -894,7 +898,10 @@ impl HostFunctionRegistry {
                 }
 
                 // Enforce per-plugin per-channel rate limit
-                if let Err(rate_err) = data.rate_limiter.record_send(&data.plugin_name, &request.channel) {
+                if let Err(rate_err) = data
+                    .rate_limiter
+                    .record_send(&data.plugin_name, &request.channel)
+                {
                     let err = HostFunctionError::new(format!(
                         "[plugin:{}/zeroclaw_send_message] {}",
                         data.plugin_name, rate_err
@@ -921,11 +928,9 @@ impl HostFunctionRegistry {
                 // Bridge async Channel::send to sync host function callback.
                 let msg = SendMessage::new(request.message, request.recipient);
                 let result = std::thread::scope(|s| {
-                    s.spawn(|| {
-                        tokio::runtime::Handle::current().block_on(channel.send(&msg))
-                    })
-                    .join()
-                    .expect("channel send thread panicked")
+                    s.spawn(|| tokio::runtime::Handle::current().block_on(channel.send(&msg)))
+                        .join()
+                        .expect("channel send thread panicked")
                 });
 
                 // Encode response as JSON and write to shared memory
@@ -935,7 +940,8 @@ impl HostFunctionRegistry {
                     Err(e) => HostFunctionError::new(format!(
                         "[plugin:{}/zeroclaw_send_message] send error: {e}",
                         data.plugin_name
-                    )).to_json_bytes(),
+                    ))
+                    .to_json_bytes(),
                 };
 
                 let handle = plugin.memory_new(&response_bytes)?;
@@ -953,10 +959,7 @@ impl HostFunctionRegistry {
     /// that are both registered in the runtime and permitted by the plugin's
     /// `allowed_channels` list. No credentials, tokens, or connection details are
     /// exposed.
-    fn make_zeroclaw_get_channels_fn(
-        &self,
-        allowed_channels: Vec<String>,
-    ) -> Function {
+    fn make_zeroclaw_get_channels_fn(&self, allowed_channels: Vec<String>) -> Function {
         let data = ChannelGetData {
             channels: self.channels.clone(),
             allowed_channels,
@@ -968,9 +971,9 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, _inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 // Filter registered channels by allowed_channels list
                 let mut channels: Vec<String> = data
@@ -985,9 +988,8 @@ impl HostFunctionRegistry {
                     .collect();
                 channels.sort();
 
-                let response_bytes =
-                    serde_json::to_vec(&GetChannelsResponse { channels })
-                        .expect("GetChannelsResponse serialization is infallible");
+                let response_bytes = serde_json::to_vec(&GetChannelsResponse { channels })
+                    .expect("GetChannelsResponse serialization is infallible");
 
                 let handle = plugin.memory_new(&response_bytes)?;
                 outputs[0] = plugin.memory_to_val(handle);
@@ -1013,9 +1015,9 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, _inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 let ctx = data.session_context.lock();
                 let response_bytes = serde_json::to_vec(&*ctx)
@@ -1045,9 +1047,9 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, _inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 let identity = data.user_identity.lock();
                 let response_bytes = serde_json::to_vec(&*identity)
@@ -1077,9 +1079,9 @@ impl HostFunctionRegistry {
             UserData::new(data),
             |plugin, _inputs, outputs, user_data| {
                 let data_lock = user_data.get()?;
-                let data = data_lock.lock().map_err(|e| {
-                    extism::Error::msg(format!("failed to lock user data: {e}"))
-                })?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
 
                 let config = data.agent_config.lock();
                 let response_bytes = serde_json::to_vec(&*config)
