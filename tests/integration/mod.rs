@@ -30,6 +30,7 @@ mod plugin_csharp_entry_point_json_marshalling;
 mod plugin_csharp_extism_pdk_reference;
 mod plugin_csharp_net8_wasi_build;
 mod plugin_csharp_sdk_structure;
+mod plugin_csharp_messaging_host_function_call;
 mod plugin_csharp_unit_test_attribute_marshalling;
 mod plugin_config_edit_nonsensitive;
 mod plugin_config_persist_toml;
