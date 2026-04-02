@@ -6,7 +6,7 @@
 //! restrictions.
 
 use zeroclaw::plugins::loader::{
-    validate_allowed_hosts, validate_plugin_allowlist, NetworkSecurityLevel,
+    NetworkSecurityLevel, validate_allowed_hosts, validate_plugin_allowlist,
 };
 
 // ── Default mode allows wildcard hosts ─────────────────────────────

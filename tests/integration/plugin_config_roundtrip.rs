@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use zeroclaw::plugins::loader::build_extism_manifest_with_config;
-use zeroclaw::plugins::{resolve_plugin_config, PluginManifest};
+use zeroclaw::plugins::{PluginManifest, resolve_plugin_config};
 
 const MULTI_TOOL_WASM: &str = "tests/plugins/artifacts/multi_tool_plugin.wasm";
 

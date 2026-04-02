@@ -5,7 +5,7 @@
 //! 2. Plugin with no capabilities (minimal)
 //! 3. Plugin with wildcard hosts
 
-use zeroclaw::plugins::{format_audit_summary, PluginManifest};
+use zeroclaw::plugins::{PluginManifest, format_audit_summary};
 
 // ---------------------------------------------------------------------------
 // Scenario 1: plugin with network, filesystem, and multiple tools

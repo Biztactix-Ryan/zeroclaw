@@ -5,7 +5,7 @@
 //! security level, and permits plugins that ARE on the list. At non-paranoid
 //! levels, all plugins pass regardless of the allowlist.
 
-use zeroclaw::plugins::loader::{validate_plugin_allowlist, NetworkSecurityLevel};
+use zeroclaw::plugins::loader::{NetworkSecurityLevel, validate_plugin_allowlist};
 
 // ── Paranoid mode ────────────────────────────────────────────────────
 

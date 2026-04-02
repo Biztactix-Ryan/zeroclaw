@@ -5,7 +5,7 @@
 //! not enforce the plugin allowlist or workspace path restrictions.
 
 use zeroclaw::plugins::loader::{
-    validate_allowed_hosts, validate_plugin_allowlist, NetworkSecurityLevel,
+    NetworkSecurityLevel, validate_allowed_hosts, validate_plugin_allowlist,
 };
 
 // ── Relaxed mode allows wildcard hosts ──────────────────────────────

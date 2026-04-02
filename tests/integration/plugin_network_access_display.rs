@@ -7,7 +7,7 @@
 //! "Network access:" heading with a ✓ prefix, and that an empty host list renders
 //! "(none)" instead.
 
-use zeroclaw::plugins::{format_audit_summary, PluginManifest};
+use zeroclaw::plugins::{PluginManifest, format_audit_summary};
 
 /// When a manifest declares allowed hosts, the audit output should list each host
 /// with a ✓ check mark under the "Network access:" heading.

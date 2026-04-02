@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use zeroclaw::plugins::host::PluginHost;
-use zeroclaw::plugins::{is_sensitive_key, PluginInfo};
+use zeroclaw::plugins::{PluginInfo, is_sensitive_key};
 
 /// Set up a PluginHost pointed at the test plugins directory.
 fn setup_host() -> PluginHost {

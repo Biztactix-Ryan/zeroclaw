@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use zeroclaw::config::schema::{Config, PluginSecurityConfig};
-use zeroclaw::plugins::loader::PluginLoader;
 use zeroclaw::plugins::PluginManifest;
+use zeroclaw::plugins::loader::PluginLoader;
 use zeroclaw::security::SecurityPolicy;
 
 // ── Helpers ────────────────────────────────────────────────────────────

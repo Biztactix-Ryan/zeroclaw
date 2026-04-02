@@ -7,7 +7,7 @@
 //! "Risk levels:" heading with its risk level and, for medium/high tools, an
 //! approval-requirement annotation.
 
-use zeroclaw::plugins::{format_audit_summary, PluginManifest};
+use zeroclaw::plugins::{PluginManifest, format_audit_summary};
 
 /// Low-risk tools should display their level without an approval annotation.
 #[test]

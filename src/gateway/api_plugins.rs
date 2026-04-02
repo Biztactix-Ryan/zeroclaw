@@ -346,7 +346,7 @@ pub mod plugin_routes {
             Ok(h) => h,
             Err(_) => {
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load plugins")
-                    .into_response()
+                    .into_response();
             }
         };
 

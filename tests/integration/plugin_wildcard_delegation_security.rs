@@ -180,7 +180,9 @@ fn explicit_tools_allowed_at_all_levels() {
     assert!(
         loader.validate_security_policy(&m).is_ok(),
         "paranoid mode should allow explicit tool delegation when plugin is allowlisted, but got: {:?}",
-        loader.validate_security_policy(&manifest_with_delegation("delegator", vec!["echo".into()])).unwrap_err()
+        loader
+            .validate_security_policy(&manifest_with_delegation("delegator", vec!["echo".into()]))
+            .unwrap_err()
     );
 }
 

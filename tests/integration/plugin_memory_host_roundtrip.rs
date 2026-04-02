@@ -17,8 +17,8 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use zeroclaw::config::AuditConfig;
 use zeroclaw::memory::traits::{Memory, MemoryCategory, MemoryEntry};
-use zeroclaw::plugins::host_functions::HostFunctionRegistry;
 use zeroclaw::plugins::PluginManifest;
+use zeroclaw::plugins::host_functions::HostFunctionRegistry;
 use zeroclaw::security::audit::AuditLogger;
 
 /// An in-memory backend that supports both store and recall so we can verify

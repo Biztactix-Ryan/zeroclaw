@@ -116,12 +116,14 @@ fn diagnose_plugins_inner(config: &Config) -> Option<serde_json::Value> {
 
     let host = match PluginHost::new(&config.workspace_dir) {
         Ok(h) => h,
-        Err(_) => return Some(serde_json::json!({
-            "loaded": 0,
-            "failed": 0,
-            "disabled": 0,
-            "entries": []
-        })),
+        Err(_) => {
+            return Some(serde_json::json!({
+                "loaded": 0,
+                "failed": 0,
+                "disabled": 0,
+                "entries": []
+            }));
+        }
     };
 
     let diagnostics = host.doctor();
@@ -207,15 +209,12 @@ pub fn run(config: &Config) -> Result<()> {
     }
 
     // Hint: cross-reference plugin doctor when plugin issues exist
-    let has_plugin_issues = results.iter().any(|i| {
-        i.category == "plugins"
-            && matches!(i.severity, Severity::Warn | Severity::Error)
-    });
+    let has_plugin_issues = results
+        .iter()
+        .any(|i| i.category == "plugins" && matches!(i.severity, Severity::Warn | Severity::Error));
     if has_plugin_issues {
         println!();
-        println!(
-            "  💡 Run `zeroclaw plugin doctor` for detailed per-plugin diagnostics."
-        );
+        println!("  💡 Run `zeroclaw plugin doctor` for detailed per-plugin diagnostics.");
     }
 
     let errors = results

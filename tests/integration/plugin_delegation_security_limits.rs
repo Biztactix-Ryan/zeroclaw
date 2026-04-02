@@ -7,20 +7,20 @@
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
-use zeroclaw::config::schema::DelegateAgentConfig;
 use zeroclaw::config::AuditConfig;
+use zeroclaw::config::schema::DelegateAgentConfig;
 use zeroclaw::memory::none::NoneMemory;
 use zeroclaw::plugins::host_functions::HostFunctionRegistry;
 use zeroclaw::plugins::{
     PluginCapabilities, PluginManifest, RiskLevel, ToolDefinition, ToolDelegationCapability,
 };
-use zeroclaw::security::audit::AuditLogger;
 use zeroclaw::security::SecurityPolicy;
-use zeroclaw::tools::traits::{Tool, ToolResult};
+use zeroclaw::security::audit::AuditLogger;
 use zeroclaw::tools::DelegateTool;
+use zeroclaw::tools::traits::{Tool, ToolResult};
 
 // ---------------------------------------------------------------------------
 // Test helpers
