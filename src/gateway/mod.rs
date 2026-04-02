@@ -38,6 +38,8 @@ use crate::tools::canvas::CanvasStore;
 use crate::tools::traits::ToolSpec;
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
+#[cfg(feature = "plugins-wasm")]
+use axum::routing::patch;
 use axum::{
     Router,
     body::Bytes,
@@ -46,8 +48,6 @@ use axum::{
     response::{IntoResponse, Json},
     routing::{delete, get, post, put},
 };
-#[cfg(feature = "plugins-wasm")]
-use axum::routing::patch;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
