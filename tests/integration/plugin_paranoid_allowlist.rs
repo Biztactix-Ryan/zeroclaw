@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Security test: paranoid mode rejects plugins not individually allowlisted.
 //!
 //! Verifies that `validate_plugin_allowlist` rejects any plugin whose name does

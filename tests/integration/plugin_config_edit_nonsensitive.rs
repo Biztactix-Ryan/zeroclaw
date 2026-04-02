@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Non-sensitive config values can be edited from the web UI.
 //!
 //! Verifies the acceptance criterion for US-ZCL-21:

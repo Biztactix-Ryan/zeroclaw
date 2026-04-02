@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test for zeroclaw_tool_call host function routing.
 //!
 //! Task US-ZCL-24-1: Verify acceptance criterion for story US-ZCL-24:

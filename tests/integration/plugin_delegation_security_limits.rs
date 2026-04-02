@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test for delegation security limits (combined).
 //!
 //! Task US-ZCL-24-10: Verify security boundaries for tool delegation:
@@ -130,6 +132,7 @@ fn agent_with_max_depth(max_depth: u32) -> HashMap<String, DelegateAgentConfig> 
             timeout_secs: None,
             agentic_timeout_secs: None,
             skills_directory: None,
+            memory_namespace: None,
         },
     );
     agents

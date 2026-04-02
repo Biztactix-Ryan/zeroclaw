@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Security test: strict mode rejects wildcard hosts and limits filesystem
 //! access to the workspace subtree.
 //!

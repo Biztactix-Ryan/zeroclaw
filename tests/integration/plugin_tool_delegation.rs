@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test for tool delegation end-to-end flow.
 //!
 //! Task US-ZCL-24-9: Verify that a plugin can delegate to a built-in tool,

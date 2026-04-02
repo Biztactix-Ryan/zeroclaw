@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Config status shows which required keys are set vs missing.
 //!
 //! Verifies the acceptance criterion for US-ZCL-21:

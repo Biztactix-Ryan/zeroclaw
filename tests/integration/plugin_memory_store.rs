@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Verify that zeroclaw_memory_store host function writes to configured memory backend.
 //!
 //! Acceptance criterion for US-ZCL-23:

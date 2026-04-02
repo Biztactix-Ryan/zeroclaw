@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: timeout_ms from plugin manifest is enforced on Extism calls.
 //!
 //! Verifies three things:

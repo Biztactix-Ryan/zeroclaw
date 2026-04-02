@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test for risk level ceiling enforcement on tool delegation.
 //!
 //! Task US-ZCL-24-2: Verify acceptance criterion for story US-ZCL-24:

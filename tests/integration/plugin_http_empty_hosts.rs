@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: empty `allowed_hosts` means no network access.
 //!
 //! Acceptance criterion for US-ZCL-6:

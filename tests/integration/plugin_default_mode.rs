@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Security test: default mode allows capabilities but warns on wildcards.
 //!
 //! Verifies that `validate_allowed_hosts` allows wildcard hosts at the Default

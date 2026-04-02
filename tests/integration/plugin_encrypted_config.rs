@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: encrypted config values (enc2: prefix) are decrypted via
 //! SecretStore before reaching the WASM plugin.
 //!

@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test for allowed_tools filtering on tool delegation.
 //!
 //! Task US-ZCL-24-4: Verify acceptance criterion for story US-ZCL-24:

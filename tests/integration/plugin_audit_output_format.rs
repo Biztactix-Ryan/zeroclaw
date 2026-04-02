@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: audit output formatting for varied plugin profiles.
 //!
 //! Covers three scenarios from US-ZCL-12-8:

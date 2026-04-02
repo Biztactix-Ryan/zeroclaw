@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Verify that a plugin without memory capability cannot access memory functions.
 //!
 //! Acceptance criterion for US-ZCL-23:

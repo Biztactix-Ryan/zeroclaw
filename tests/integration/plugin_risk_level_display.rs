@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Displays tool risk levels with approval requirements.
 //!
 //! Verifies the acceptance criterion for story US-ZCL-12:

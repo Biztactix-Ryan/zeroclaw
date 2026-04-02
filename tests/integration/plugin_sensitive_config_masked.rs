@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Sensitive config keys show as masked with no edit capability.
 //!
 //! Verifies the acceptance criterion for US-ZCL-21:

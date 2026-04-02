@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Security test: relaxed mode allows all declared capabilities.
 //!
 //! Verifies that `validate_allowed_hosts` allows wildcard hosts at the Relaxed

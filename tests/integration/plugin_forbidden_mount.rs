@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Security test: mounting /etc/passwd is rejected at load time.
 //!
 //! Verifies that `validate_allowed_paths` rejects a plugin manifest that

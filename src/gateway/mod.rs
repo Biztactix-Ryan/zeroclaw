@@ -44,7 +44,7 @@ use axum::{
     extract::{ConnectInfo, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, post, put},
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;

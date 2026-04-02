@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test for memory host functions: store-then-recall round-trip.
 //!
 //! Task US-ZCL-23-9: Create a test plugin that calls memory_store then

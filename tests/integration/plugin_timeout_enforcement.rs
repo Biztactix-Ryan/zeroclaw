@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: timeout enforcement with a short (100ms) timeout.
 //!
 //! Task US-ZCL-17-7: Create or use a test plugin with an intentional infinite

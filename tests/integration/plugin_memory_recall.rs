@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Verify that zeroclaw_memory_recall host function queries memory and returns results.
 //!
 //! Acceptance criterion for US-ZCL-23:

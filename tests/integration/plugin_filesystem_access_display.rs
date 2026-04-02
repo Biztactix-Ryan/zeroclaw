@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Displays filesystem access (allowed paths) with check/cross marks.
 //!
 //! Verifies the acceptance criterion for story US-ZCL-12:

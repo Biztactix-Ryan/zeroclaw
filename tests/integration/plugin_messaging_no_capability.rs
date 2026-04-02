@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Verify that a plugin without messaging capability cannot access messaging functions.
 //!
 //! Task US-ZCL-25-5: Acceptance criterion for story US-ZCL-25:

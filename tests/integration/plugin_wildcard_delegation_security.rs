@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: wildcard tool delegation requires strict/paranoid approval.
 //!
 //! Task US-ZCL-24-5: Verify acceptance criterion for story US-ZCL-24:

@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Security audit summary displays network and filesystem capabilities.
 //!
 //! Verifies the acceptance criterion for US-ZCL-21:

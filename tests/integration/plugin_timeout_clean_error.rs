@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: plugin exceeding timeout is terminated cleanly with error response.
 //!
 //! Verifies the acceptance criterion for US-ZCL-17:

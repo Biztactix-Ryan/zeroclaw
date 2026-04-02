@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: tool_lookup_config reads injected config values.
 //!
 //! Loads `multi_tool_plugin.wasm` with config `{api_key: "test-key", model: "test-model"}`,

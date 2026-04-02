@@ -1,3 +1,5 @@
+#![cfg(feature = "plugins-wasm")]
+
 //! Integration test: Displays network access (allowed hosts) with check/cross marks.
 //!
 //! Verifies the acceptance criterion for story US-ZCL-12:
