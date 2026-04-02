@@ -44,8 +44,10 @@ use axum::{
     extract::{ConnectInfo, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, post, put},
 };
+#[cfg(feature = "plugins-wasm")]
+use axum::routing::patch;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
