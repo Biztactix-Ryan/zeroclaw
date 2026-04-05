@@ -134,6 +134,26 @@ pub fn validate_allowed_hosts(
     Ok(())
 }
 
+/// Validate a plugin's CLI `allowed_commands` against security policy.
+///
+/// Wildcards (`*`) in CLI allowed_commands are **always** rejected regardless of
+/// security level. CLI execution is more dangerous than HTTP — a wildcard would
+/// allow arbitrary command execution, so no wildcards are permitted at any level.
+pub fn validate_allowed_cli_commands(
+    plugin_name: &str,
+    allowed_commands: &[String],
+) -> Result<(), PluginError> {
+    for cmd in allowed_commands {
+        if cmd.contains('*') {
+            return Err(PluginError::WildcardCliCommandRejected {
+                plugin: plugin_name.to_string(),
+                command: cmd.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Expand `~` and `~/…` prefixes to the user's home directory.
 pub fn expand_user_path(path: &str) -> PathBuf {
     if path == "~" {
@@ -319,6 +339,11 @@ impl<'a> PluginLoader<'a> {
         // 2b. Validate wildcard tool delegation against the security level.
         if let Some(ref td) = manifest.host_capabilities.tool_delegation {
             validate_allowed_tools_delegation(&manifest.name, &td.allowed_tools, level)?;
+        }
+
+        // 2c. Validate CLI allowed_commands — wildcards are never allowed at any level.
+        if let Some(ref cli) = manifest.host_capabilities.cli {
+            validate_allowed_cli_commands(&manifest.name, &cli.allowed_commands)?;
         }
 
         // 3. Reject forbidden paths (all levels).
@@ -1256,6 +1281,93 @@ logs  = "/var/log/app"
                 result.is_ok(),
                 "empty hosts should always pass, failed at {level:?}"
             );
+        }
+    }
+
+    // ── US-ZCL-58-9: CLI wildcards rejected at all security levels ──
+
+    #[test]
+    fn cli_wildcard_star_rejected_at_all_levels() {
+        let commands = vec!["*".to_string()];
+        let result = validate_allowed_cli_commands("cli-plugin", &commands);
+        assert!(
+            result.is_err(),
+            "bare wildcard '*' must be rejected for CLI commands"
+        );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cli-plugin"),
+            "error should name the plugin: {msg}"
+        );
+        assert!(
+            msg.contains("*"),
+            "error should include the offending command: {msg}"
+        );
+        assert!(
+            msg.contains("all security levels"),
+            "error should mention that wildcards are forbidden at all levels: {msg}"
+        );
+    }
+
+    #[test]
+    fn cli_wildcard_prefix_rejected() {
+        let commands = vec!["git*".to_string()];
+        let result = validate_allowed_cli_commands("prefix-plugin", &commands);
+        assert!(
+            result.is_err(),
+            "'git*' pattern must be rejected for CLI commands"
+        );
+    }
+
+    #[test]
+    fn cli_wildcard_suffix_rejected() {
+        let commands = vec!["*sh".to_string()];
+        let result = validate_allowed_cli_commands("suffix-plugin", &commands);
+        assert!(
+            result.is_err(),
+            "'*sh' pattern must be rejected for CLI commands"
+        );
+    }
+
+    #[test]
+    fn cli_wildcard_embedded_rejected() {
+        let commands = vec!["g*t".to_string()];
+        let result = validate_allowed_cli_commands("embed-plugin", &commands);
+        assert!(
+            result.is_err(),
+            "'g*t' pattern must be rejected for CLI commands"
+        );
+    }
+
+    #[test]
+    fn cli_exact_commands_allowed() {
+        let commands = vec!["git".to_string(), "npm".to_string(), "cargo".to_string()];
+        let result = validate_allowed_cli_commands("exact-plugin", &commands);
+        assert!(
+            result.is_ok(),
+            "exact command names should pass CLI validation"
+        );
+    }
+
+    #[test]
+    fn cli_empty_commands_pass() {
+        let commands: Vec<String> = vec![];
+        let result = validate_allowed_cli_commands("empty-plugin", &commands);
+        assert!(result.is_ok(), "empty commands list should pass");
+    }
+
+    #[test]
+    fn cli_wildcard_rejected_error_variant() {
+        let commands = vec!["*".to_string()];
+        let err = validate_allowed_cli_commands("star-plugin", &commands)
+            .expect_err("bare '*' must be rejected");
+        match &err {
+            PluginError::WildcardCliCommandRejected { plugin, command } => {
+                assert_eq!(plugin, "star-plugin");
+                assert_eq!(command, "*");
+            }
+            other => panic!("expected WildcardCliCommandRejected, got: {other:?}"),
         }
     }
 

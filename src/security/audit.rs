@@ -29,6 +29,7 @@ pub enum AuditEventType {
     PolicyViolation,
     SecurityEvent,
     PluginExecution,
+    CliExecution,
 }
 
 /// Actor information (who performed the action)
@@ -257,6 +258,228 @@ pub struct PluginExecutionLog<'a> {
     pub http_requests: Option<Vec<HttpRequestEntry>>,
 }
 
+/// Audit entry for CLI command executions from WASM plugins.
+///
+/// Captures all relevant details about a CLI command executed via the
+/// `zeroclaw_cli_exec` host function, with sensitive arguments automatically
+/// redacted for safe logging.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliAuditEntry {
+    /// Name of the plugin that executed the command.
+    pub plugin_name: String,
+    /// The command that was executed (e.g., "git", "npm").
+    pub command: String,
+    /// Command arguments with sensitive values redacted.
+    pub args_redacted: Vec<String>,
+    /// Working directory where the command was executed.
+    pub working_dir: Option<String>,
+    /// Exit code returned by the command.
+    pub exit_code: i32,
+    /// Execution duration in milliseconds.
+    pub duration_ms: u64,
+    /// Number of bytes in the combined stdout/stderr output.
+    pub output_bytes: usize,
+    /// Whether the output was truncated due to size limits.
+    pub truncated: bool,
+    /// Whether the command was terminated due to timeout.
+    pub timed_out: bool,
+    /// Timestamp when the command completed.
+    pub timestamp: DateTime<Utc>,
+}
+
+impl CliAuditEntry {
+    /// Create a new CLI audit entry with automatic argument redaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        plugin_name: impl Into<String>,
+        command: impl Into<String>,
+        args: &[String],
+        working_dir: Option<String>,
+        exit_code: i32,
+        duration_ms: u64,
+        output_bytes: usize,
+        truncated: bool,
+        timed_out: bool,
+    ) -> Self {
+        Self {
+            plugin_name: plugin_name.into(),
+            command: command.into(),
+            args_redacted: args.iter().map(|a| redact_sensitive_arg(a)).collect(),
+            working_dir,
+            exit_code,
+            duration_ms,
+            output_bytes,
+            truncated,
+            timed_out,
+            timestamp: Utc::now(),
+        }
+    }
+}
+
+/// Patterns for arguments that should be fully redacted.
+///
+/// These patterns match common sensitive argument forms like:
+/// - `--password=secret` or `--token=abc123`
+/// - `-p secret` style (detected by flag, value redacted separately)
+/// - Values that look like API keys or tokens
+const SENSITIVE_ARG_PREFIXES: &[&str] = &[
+    "--password=",
+    "--passwd=",
+    "--token=",
+    "--api-key=",
+    "--apikey=",
+    "--secret=",
+    "--secret-key=",
+    "--access-key=",
+    "--auth=",
+    "--authorization=",
+    "--bearer=",
+    "--credential=",
+    "--private-key=",
+    "-p=",
+];
+
+/// Short flags that indicate the next argument is sensitive.
+const SENSITIVE_SHORT_FLAGS: &[&str] = &["-p", "-P", "--password", "--token", "--secret"];
+
+/// Redact sensitive values from a single command-line argument.
+///
+/// Handles several patterns:
+/// - `--password=value` → `--password=[REDACTED]`
+/// - Values matching API key patterns → `[REDACTED]`
+/// - Environment variable assignments with secrets → `VAR=[REDACTED]`
+pub fn redact_sensitive_arg(arg: &str) -> String {
+    // Check for --key=value patterns with sensitive keys
+    for prefix in SENSITIVE_ARG_PREFIXES {
+        if let Some(stripped) = arg.to_lowercase().strip_prefix(&prefix.to_lowercase()) {
+            if !stripped.is_empty() {
+                // Find the actual prefix length in the original string (case-preserved)
+                let prefix_len = prefix.len();
+                return format!("{}[REDACTED]", &arg[..prefix_len]);
+            }
+        }
+    }
+
+    // Check for environment variable assignments with sensitive names
+    if let Some(eq_pos) = arg.find('=') {
+        let var_name = &arg[..eq_pos].to_uppercase();
+        if is_sensitive_env_var(var_name) {
+            return format!("{}=[REDACTED]", &arg[..eq_pos]);
+        }
+    }
+
+    // Check if the value itself looks like a secret (API key, token, etc.)
+    if looks_like_secret(arg) {
+        return "[REDACTED]".to_string();
+    }
+
+    arg.to_string()
+}
+
+/// Check if an environment variable name suggests sensitive content.
+fn is_sensitive_env_var(name: &str) -> bool {
+    let sensitive_patterns = [
+        "PASSWORD",
+        "PASSWD",
+        "SECRET",
+        "TOKEN",
+        "API_KEY",
+        "APIKEY",
+        "AUTH",
+        "CREDENTIAL",
+        "PRIVATE_KEY",
+        "ACCESS_KEY",
+        "AWS_SECRET",
+    ];
+    sensitive_patterns.iter().any(|p| name.contains(p))
+}
+
+/// Check if a value looks like a secret (API key, token, etc.).
+///
+/// Detects common patterns:
+/// - Prefixes: sk-, pk-, xox[bpra]-, ghp_, gho_, ghu_, github_pat_
+/// - Base64-encoded strings of sufficient length
+/// - High-entropy alphanumeric strings
+fn looks_like_secret(value: &str) -> bool {
+    // Skip short values and paths
+    if value.len() < 16 || value.starts_with('/') || value.starts_with('.') {
+        return false;
+    }
+
+    // Common API key prefixes
+    let secret_prefixes = [
+        "sk-",
+        "sk_",
+        "pk-",
+        "pk_",
+        "xoxb-",
+        "xoxp-",
+        "xoxa-",
+        "xoxr-",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "github_pat_",
+        "glpat-",
+        "AKIA", // AWS access key
+        "bearer ",
+        "Bearer ",
+    ];
+
+    if secret_prefixes.iter().any(|p| value.starts_with(p)) {
+        return true;
+    }
+
+    // Check for high-entropy alphanumeric strings (likely tokens/keys)
+    // Must be mostly alphanumeric and have good character variety
+    if value.len() >= 24 {
+        let alphanum_count = value.chars().filter(|c| c.is_ascii_alphanumeric()).count();
+        let alphanum_ratio = alphanum_count as f64 / value.len() as f64;
+
+        if alphanum_ratio > 0.85 {
+            // Count unique characters - high variety suggests randomness
+            let unique_chars: std::collections::HashSet<char> = value.chars().collect();
+            let uniqueness_ratio = unique_chars.len() as f64 / value.len() as f64;
+
+            // High uniqueness in a long alphanumeric string suggests a secret
+            if uniqueness_ratio > 0.4 {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Redact sensitive values from a sequence of arguments.
+///
+/// Handles positional sensitivity: if a flag like `-p` or `--password` is seen,
+/// the following argument is also redacted.
+pub fn redact_sensitive_args(args: &[String]) -> Vec<String> {
+    let mut result = Vec::with_capacity(args.len());
+    let mut redact_next = false;
+
+    for arg in args {
+        if redact_next {
+            result.push("[REDACTED]".to_string());
+            redact_next = false;
+            continue;
+        }
+
+        // Check if this flag indicates the next arg is sensitive
+        if SENSITIVE_SHORT_FLAGS.iter().any(|f| arg == *f) {
+            result.push(arg.clone());
+            redact_next = true;
+            continue;
+        }
+
+        result.push(redact_sensitive_arg(arg));
+    }
+
+    result
+}
+
 impl AuditLogger {
     /// Create a new audit logger.
     ///
@@ -423,6 +646,45 @@ impl AuditLogger {
             if !requests.is_empty() {
                 action.http_requests = Some(requests);
             }
+        }
+
+        self.log(&event)
+    }
+
+    /// Log a CLI command execution from a plugin.
+    ///
+    /// Records command, redacted arguments, exit code, duration, and output metadata.
+    /// This is called after each `zeroclaw_cli_exec` invocation completes.
+    pub fn log_cli(&self, entry: &CliAuditEntry) -> Result<()> {
+        let success = entry.exit_code == 0 && !entry.timed_out;
+        let error = if entry.timed_out {
+            Some("command timed out".to_string())
+        } else if entry.exit_code != 0 {
+            Some(format!("exit code {}", entry.exit_code))
+        } else {
+            None
+        };
+
+        let mut event = AuditEvent::new(AuditEventType::CliExecution)
+            .with_actor(entry.plugin_name.clone(), None, None)
+            .with_action(
+                entry.command.clone(),
+                "medium".to_string(), // CLI execution is medium risk
+                true,                 // approved (passed capability checks)
+                true,                 // allowed (command was in allowlist)
+            )
+            .with_result(success, Some(entry.exit_code), entry.duration_ms, error);
+
+        // Store redacted args and CLI metadata as JSON in the redacted_input field
+        if let Some(action) = &mut event.action {
+            let cli_details = serde_json::json!({
+                "args": entry.args_redacted,
+                "working_dir": entry.working_dir,
+                "output_bytes": entry.output_bytes,
+                "truncated": entry.truncated,
+                "timed_out": entry.timed_out,
+            });
+            action.redacted_input = Some(cli_details.to_string());
         }
 
         self.log(&event)
@@ -1349,5 +1611,148 @@ mod tests {
         assert!(rec3.signature.is_some(), "second signed record");
 
         Ok(())
+    }
+
+    // ── CliAuditEntry and argument redaction tests ─────────────────────────────
+
+    #[test]
+    fn redact_sensitive_arg_password_flag() {
+        assert_eq!(
+            redact_sensitive_arg("--password=secret123"),
+            "--password=[REDACTED]"
+        );
+        assert_eq!(
+            redact_sensitive_arg("--token=abc123def"),
+            "--token=[REDACTED]"
+        );
+        assert_eq!(
+            redact_sensitive_arg("--api-key=sk-12345"),
+            "--api-key=[REDACTED]"
+        );
+    }
+
+    #[test]
+    fn redact_sensitive_arg_preserves_safe_args() {
+        assert_eq!(redact_sensitive_arg("--verbose"), "--verbose");
+        assert_eq!(redact_sensitive_arg("-v"), "-v");
+        assert_eq!(redact_sensitive_arg("/path/to/file"), "/path/to/file");
+        assert_eq!(redact_sensitive_arg("filename.txt"), "filename.txt");
+    }
+
+    #[test]
+    fn redact_sensitive_arg_env_var_assignment() {
+        assert_eq!(
+            redact_sensitive_arg("API_KEY=sk_test_secret"),
+            "API_KEY=[REDACTED]"
+        );
+        assert_eq!(
+            redact_sensitive_arg("PASSWORD=hunter2"),
+            "PASSWORD=[REDACTED]"
+        );
+        assert_eq!(
+            redact_sensitive_arg("AWS_SECRET_ACCESS_KEY=abc123"),
+            "AWS_SECRET_ACCESS_KEY=[REDACTED]"
+        );
+        // Non-sensitive env var should be preserved
+        assert_eq!(redact_sensitive_arg("HOME=/home/user"), "HOME=/home/user");
+    }
+
+    #[test]
+    fn redact_sensitive_arg_api_key_patterns() {
+        // OpenAI-style keys
+        assert_eq!(
+            redact_sensitive_arg("sk-abc123def456ghi789jkl0"),
+            "[REDACTED]"
+        );
+        // Stripe-style keys
+        assert_eq!(
+            redact_sensitive_arg("sk_test_1234567890abcdef"),
+            "[REDACTED]"
+        );
+        // GitHub tokens
+        assert_eq!(redact_sensitive_arg("ghp_abc123def456ghi789"), "[REDACTED]");
+        assert_eq!(redact_sensitive_arg("gho_abc123def456ghi789"), "[REDACTED]");
+        // AWS access key ID
+        assert_eq!(redact_sensitive_arg("AKIAIOSFODNN7EXAMPLE"), "[REDACTED]");
+    }
+
+    #[test]
+    fn redact_sensitive_args_positional() {
+        let args = vec![
+            "git".to_string(),
+            "clone".to_string(),
+            "-p".to_string(),
+            "secret_password".to_string(),
+            "https://github.com/example/repo".to_string(),
+        ];
+        let redacted = redact_sensitive_args(&args);
+        assert_eq!(redacted[0], "git");
+        assert_eq!(redacted[1], "clone");
+        assert_eq!(redacted[2], "-p");
+        assert_eq!(redacted[3], "[REDACTED]");
+        assert_eq!(redacted[4], "https://github.com/example/repo");
+    }
+
+    #[test]
+    fn cli_audit_entry_redacts_args_on_creation() {
+        let entry = CliAuditEntry::new(
+            "test-plugin",
+            "curl",
+            &[
+                "-H".to_string(),
+                "Authorization: Bearer sk-abc123def456ghi789jkl0".to_string(),
+                "https://api.example.com".to_string(),
+            ],
+            Some("/tmp".to_string()),
+            0,
+            100,
+            1024,
+            false,
+            false,
+        );
+
+        assert_eq!(entry.plugin_name, "test-plugin");
+        assert_eq!(entry.command, "curl");
+        assert_eq!(entry.args_redacted[0], "-H");
+        // The Bearer token should be redacted
+        assert!(entry.args_redacted[1].contains("[REDACTED]"));
+        assert_eq!(entry.args_redacted[2], "https://api.example.com");
+        assert_eq!(entry.exit_code, 0);
+        assert_eq!(entry.duration_ms, 100);
+        assert_eq!(entry.output_bytes, 1024);
+        assert!(!entry.truncated);
+        assert!(!entry.timed_out);
+    }
+
+    #[test]
+    fn cli_audit_entry_serializes_to_json() {
+        let entry = CliAuditEntry::new(
+            "my-plugin",
+            "ls",
+            &["-la".to_string()],
+            None,
+            0,
+            50,
+            256,
+            false,
+            false,
+        );
+
+        let json = serde_json::to_string(&entry).expect("serialization should succeed");
+        assert!(json.contains("\"plugin_name\":\"my-plugin\""));
+        assert!(json.contains("\"command\":\"ls\""));
+        assert!(json.contains("\"-la\""));
+    }
+
+    #[test]
+    fn looks_like_secret_high_entropy_detection() {
+        // Random-looking alphanumeric strings should be detected
+        assert!(looks_like_secret("xQ7zK9mN4pR2sT6uV8wY0aB3cD5eF7gH"));
+        // Short values should not be flagged
+        assert!(!looks_like_secret("abc123"));
+        // Paths should not be flagged
+        assert!(!looks_like_secret("/usr/local/bin/program"));
+        // Regular words should not be flagged
+        assert!(!looks_like_secret("hello-world-config"));
     }
 }

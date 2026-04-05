@@ -144,6 +144,9 @@ pub struct PluginCapabilities {
     /// Access to runtime context (session, user identity, agent config).
     #[serde(default)]
     pub context: Option<ContextCapability>,
+    /// CLI execution capability — run shell commands with restrictions.
+    #[serde(default)]
+    pub cli: Option<CliCapability>,
 }
 
 /// Memory subsystem access.
@@ -202,6 +205,174 @@ pub struct ContextCapability {
     /// Access to agent configuration.
     #[serde(default)]
     pub agent_config: bool,
+}
+
+/// Pattern for validating CLI arguments using glob-like matching.
+///
+/// Each ArgPattern associates a command with a set of argument patterns.
+/// When validating, the command must match exactly, and each argument
+/// must match at least one of the patterns.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArgPattern {
+    /// The command this pattern applies to (e.g., "git", "npm").
+    pub command: String,
+    /// Glob patterns for allowed arguments (e.g., ["--verbose", "-*", "*.txt"]).
+    #[serde(default)]
+    pub patterns: Vec<String>,
+}
+
+impl ArgPattern {
+    /// Create a new ArgPattern for a command with allowed argument patterns.
+    pub fn new(command: impl Into<String>, patterns: Vec<String>) -> Self {
+        Self {
+            command: command.into(),
+            patterns,
+        }
+    }
+
+    /// Compile patterns into glob::Pattern objects.
+    /// Returns an error if any pattern is invalid.
+    pub fn compile(&self) -> Result<Vec<glob::Pattern>, glob::PatternError> {
+        self.patterns
+            .iter()
+            .map(|p| glob::Pattern::new(p))
+            .collect()
+    }
+
+    /// Check if an argument matches any of the patterns for this command.
+    /// Returns false if the command doesn't match or no pattern matches the argument.
+    pub fn matches(&self, cmd: &str, arg: &str) -> bool {
+        if self.command != cmd {
+            return false;
+        }
+        // Empty patterns means no arguments are allowed
+        if self.patterns.is_empty() {
+            return false;
+        }
+        // Check if any pattern matches the argument
+        self.patterns.iter().any(|pattern| {
+            glob::Pattern::new(pattern)
+                .map(|p| p.matches(arg))
+                .unwrap_or(false)
+        })
+    }
+
+    /// Check if all arguments match at least one pattern for this command.
+    /// Returns true if all arguments are allowed, false otherwise.
+    pub fn matches_all(&self, cmd: &str, args: &[&str]) -> bool {
+        if self.command != cmd {
+            return false;
+        }
+        // All arguments must match at least one pattern
+        args.iter().all(|arg| self.matches(cmd, arg))
+    }
+
+    /// Check if any pattern contains glob wildcard characters (*, ?, []).
+    ///
+    /// Returns true if at least one pattern contains wildcards.
+    /// Used for Strict security level validation which rejects wildcard patterns.
+    pub fn has_wildcards(&self) -> bool {
+        self.patterns
+            .iter()
+            .any(|p| p.contains('*') || p.contains('?') || p.contains('['))
+    }
+
+    /// Check if an argument exactly matches any pattern for this command (no glob).
+    ///
+    /// Unlike `matches()` which uses glob pattern matching, this performs
+    /// literal string comparison. Used for Strict security level validation.
+    pub fn matches_exact(&self, cmd: &str, arg: &str) -> bool {
+        if self.command != cmd {
+            return false;
+        }
+        // Empty patterns means no arguments are allowed
+        if self.patterns.is_empty() {
+            return false;
+        }
+        // Check if any pattern exactly equals the argument
+        self.patterns.iter().any(|pattern| pattern == arg)
+    }
+
+    /// Returns patterns that are considered "broad" (overly permissive).
+    ///
+    /// Broad patterns include:
+    /// - Patterns ending with `*` (e.g., `-*`, `--save*`, `*`)
+    /// - Patterns that are just `*` (matches everything)
+    ///
+    /// Used for Default security level to log warnings when such patterns are detected.
+    pub fn get_broad_patterns(&self) -> Vec<&str> {
+        self.patterns
+            .iter()
+            .filter(|p| p.ends_with('*'))
+            .map(|p| p.as_str())
+            .collect()
+    }
+}
+
+// Default CLI capability constants
+/// Default CLI command timeout in milliseconds (5 seconds).
+pub const DEFAULT_CLI_TIMEOUT_MS: u64 = 5_000;
+/// Default maximum CLI output size in bytes (1 MiB).
+pub const DEFAULT_CLI_MAX_OUTPUT_BYTES: usize = 1_048_576;
+/// Default maximum concurrent CLI command executions.
+pub const DEFAULT_CLI_MAX_CONCURRENT: usize = 2;
+/// Default CLI commands per minute rate limit.
+pub const DEFAULT_CLI_RATE_LIMIT_PER_MINUTE: u32 = 10;
+
+fn default_cli_timeout_ms() -> u64 {
+    DEFAULT_CLI_TIMEOUT_MS
+}
+
+fn default_cli_max_output_bytes() -> usize {
+    DEFAULT_CLI_MAX_OUTPUT_BYTES
+}
+
+fn default_cli_max_concurrent() -> usize {
+    DEFAULT_CLI_MAX_CONCURRENT
+}
+
+fn default_cli_rate_limit_per_minute() -> u32 {
+    DEFAULT_CLI_RATE_LIMIT_PER_MINUTE
+}
+
+/// CLI execution capability — allows a plugin to run shell commands.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CliCapability {
+    /// Commands the plugin is allowed to execute (e.g., ["git", "npm"]).
+    #[serde(default)]
+    pub allowed_commands: Vec<String>,
+    /// Argument patterns the plugin is allowed to pass to commands.
+    #[serde(default)]
+    pub allowed_args: Vec<ArgPattern>,
+    /// Environment variables the plugin is allowed to access/set.
+    #[serde(default)]
+    pub allowed_env: Vec<String>,
+    /// Maximum execution time in milliseconds. Defaults to 30 seconds.
+    #[serde(default = "default_cli_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Maximum output size in bytes. Defaults to 1 MiB.
+    #[serde(default = "default_cli_max_output_bytes")]
+    pub max_output_bytes: usize,
+    /// Maximum concurrent command executions. Defaults to 4.
+    #[serde(default = "default_cli_max_concurrent")]
+    pub max_concurrent: usize,
+    /// Maximum commands per minute. Defaults to 60.
+    #[serde(default = "default_cli_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
+}
+
+impl Default for CliCapability {
+    fn default() -> Self {
+        Self {
+            allowed_commands: Vec::new(),
+            allowed_args: Vec::new(),
+            allowed_env: Vec::new(),
+            timeout_ms: default_cli_timeout_ms(),
+            max_output_bytes: default_cli_max_output_bytes(),
+            max_concurrent: default_cli_max_concurrent(),
+            rate_limit_per_minute: default_cli_rate_limit_per_minute(),
+        }
+    }
 }
 
 /// Information about a loaded plugin.
@@ -1858,5 +2029,481 @@ risk_level = "critical"
             resolve_plugin_config("sensitive-plugin", &manifest_config, Some(&values)).unwrap();
         // The actual value is passed through — redaction is only for logging
         assert_eq!(result["token"], "secret-token-value-12345");
+    }
+
+    #[test]
+    fn test_cli_capability_allowed_env_supported() {
+        // Test that CliCapability supports environment variable allowlist
+        let json = r#"{
+            "allowed_commands": ["npm", "node"],
+            "allowed_args": [],
+            "allowed_env": ["NODE_ENV", "PATH", "HOME"],
+            "timeout_ms": 30000,
+            "max_output_bytes": 1048576,
+            "max_concurrent": 4,
+            "rate_limit_per_minute": 60
+        }"#;
+
+        let cap: CliCapability = serde_json::from_str(json).unwrap();
+
+        assert_eq!(cap.allowed_env, vec!["NODE_ENV", "PATH", "HOME"]);
+        assert_eq!(cap.allowed_commands, vec!["npm", "node"]);
+    }
+
+    #[test]
+    fn test_cli_capability_allowed_env_defaults_to_empty() {
+        // Test that allowed_env defaults to empty when not specified
+        let cap = CliCapability::default();
+        assert!(cap.allowed_env.is_empty());
+
+        // Also verify via deserialization with missing field
+        let json = r#"{
+            "allowed_commands": ["git"]
+        }"#;
+        let cap: CliCapability = serde_json::from_str(json).unwrap();
+        assert!(cap.allowed_env.is_empty());
+    }
+
+    #[test]
+    fn test_cli_capability_allowed_env_serialization_roundtrip() {
+        // Test serialization/deserialization roundtrip preserves allowed_env
+        let original = CliCapability {
+            allowed_commands: vec!["cargo".to_string()],
+            allowed_args: vec![],
+            allowed_env: vec!["RUST_LOG".to_string(), "CARGO_HOME".to_string()],
+            timeout_ms: 60_000,
+            max_output_bytes: 2_097_152,
+            max_concurrent: 2,
+            rate_limit_per_minute: 30,
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: CliCapability = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.allowed_env, original.allowed_env);
+        assert_eq!(restored.allowed_env, vec!["RUST_LOG", "CARGO_HOME"]);
+    }
+
+    #[test]
+    fn test_arg_pattern_new() {
+        let pattern = ArgPattern::new("git", vec!["push".to_string(), "pull".to_string()]);
+        assert_eq!(pattern.command, "git");
+        assert_eq!(pattern.patterns, vec!["push", "pull"]);
+    }
+
+    #[test]
+    fn test_arg_pattern_compile_valid() {
+        let pattern = ArgPattern::new("npm", vec!["install".to_string(), "--*".to_string()]);
+        let compiled = pattern.compile().unwrap();
+        assert_eq!(compiled.len(), 2);
+    }
+
+    #[test]
+    fn test_arg_pattern_compile_invalid() {
+        let pattern = ArgPattern::new("cmd", vec!["[invalid".to_string()]);
+        let result = pattern.compile();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_arg_pattern_matches_exact() {
+        let pattern = ArgPattern::new("git", vec!["push".to_string(), "pull".to_string()]);
+        assert!(pattern.matches("git", "push"));
+        assert!(pattern.matches("git", "pull"));
+        assert!(!pattern.matches("git", "clone"));
+        assert!(!pattern.matches("hg", "push")); // wrong command
+    }
+
+    #[test]
+    fn test_arg_pattern_matches_glob() {
+        let pattern = ArgPattern::new("npm", vec!["--*".to_string(), "-?".to_string()]);
+        assert!(pattern.matches("npm", "--verbose"));
+        assert!(pattern.matches("npm", "--save-dev"));
+        assert!(pattern.matches("npm", "-v"));
+        assert!(!pattern.matches("npm", "install")); // doesn't match either pattern
+    }
+
+    #[test]
+    fn test_arg_pattern_matches_wildcard() {
+        let pattern = ArgPattern::new("ls", vec!["*".to_string()]);
+        assert!(pattern.matches("ls", "-la"));
+        assert!(pattern.matches("ls", "src/"));
+        assert!(pattern.matches("ls", "--color=auto"));
+    }
+
+    #[test]
+    fn test_arg_pattern_matches_empty_patterns() {
+        let pattern = ArgPattern::new("rm", vec![]);
+        assert!(!pattern.matches("rm", "-rf")); // no patterns means nothing allowed
+    }
+
+    #[test]
+    fn test_arg_pattern_matches_all() {
+        let pattern = ArgPattern::new("git", vec!["push".to_string(), "--*".to_string()]);
+        assert!(pattern.matches_all("git", &["push", "--force"]));
+        assert!(!pattern.matches_all("git", &["push", "origin"])); // "origin" doesn't match
+        assert!(!pattern.matches_all("hg", &["push"])); // wrong command
+    }
+
+    #[test]
+    fn test_arg_pattern_serialization_roundtrip() {
+        let original = ArgPattern::new(
+            "cargo",
+            vec!["build".to_string(), "test".to_string(), "--*".to_string()],
+        );
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: ArgPattern = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.command, original.command);
+        assert_eq!(restored.patterns, original.patterns);
+    }
+
+    /// AC: Argument pattern schema supports glob-like matching
+    /// Validates that ArgPattern supports standard glob syntax for argument validation.
+    #[test]
+    fn test_arg_pattern_glob_like_matching_acceptance() {
+        // Test 1: Asterisk (*) matches any sequence of characters
+        let star_pattern = ArgPattern::new("cmd", vec!["--prefix-*".to_string()]);
+        assert!(star_pattern.matches("cmd", "--prefix-foo"));
+        assert!(star_pattern.matches("cmd", "--prefix-bar-baz"));
+        assert!(star_pattern.matches("cmd", "--prefix-")); // matches empty suffix
+        assert!(!star_pattern.matches("cmd", "--other-flag"));
+
+        // Test 2: Question mark (?) matches exactly one character
+        let question_pattern = ArgPattern::new("cmd", vec!["-?".to_string()]);
+        assert!(question_pattern.matches("cmd", "-v"));
+        assert!(question_pattern.matches("cmd", "-x"));
+        assert!(!question_pattern.matches("cmd", "-vv")); // too many chars
+        assert!(!question_pattern.matches("cmd", "-")); // too few chars
+
+        // Test 3: Character class [abc] matches any single char in the set
+        let class_pattern = ArgPattern::new("cmd", vec!["--log-[abc]".to_string()]);
+        assert!(class_pattern.matches("cmd", "--log-a"));
+        assert!(class_pattern.matches("cmd", "--log-b"));
+        assert!(class_pattern.matches("cmd", "--log-c"));
+        assert!(!class_pattern.matches("cmd", "--log-d"));
+        assert!(!class_pattern.matches("cmd", "--log-ab"));
+
+        // Test 4: Negated character class [!abc] matches any char NOT in the set
+        let neg_class_pattern = ArgPattern::new("cmd", vec!["--opt-[!xy]".to_string()]);
+        assert!(neg_class_pattern.matches("cmd", "--opt-a"));
+        assert!(neg_class_pattern.matches("cmd", "--opt-z"));
+        assert!(!neg_class_pattern.matches("cmd", "--opt-x"));
+        assert!(!neg_class_pattern.matches("cmd", "--opt-y"));
+
+        // Test 5: Range [a-z] matches any char in the range
+        let range_pattern = ArgPattern::new("cmd", vec!["--level-[0-9]".to_string()]);
+        assert!(range_pattern.matches("cmd", "--level-0"));
+        assert!(range_pattern.matches("cmd", "--level-5"));
+        assert!(range_pattern.matches("cmd", "--level-9"));
+        assert!(!range_pattern.matches("cmd", "--level-a"));
+
+        // Test 6: Multiple patterns work (any match succeeds)
+        let multi_pattern = ArgPattern::new(
+            "git",
+            vec!["push".to_string(), "pull".to_string(), "--*".to_string()],
+        );
+        assert!(multi_pattern.matches("git", "push"));
+        assert!(multi_pattern.matches("git", "pull"));
+        assert!(multi_pattern.matches("git", "--force"));
+        assert!(multi_pattern.matches("git", "--verbose"));
+        assert!(!multi_pattern.matches("git", "clone"));
+
+        // Test 7: File extension patterns (common use case)
+        let ext_pattern = ArgPattern::new("cat", vec!["*.txt".to_string(), "*.md".to_string()]);
+        assert!(ext_pattern.matches("cat", "readme.txt"));
+        assert!(ext_pattern.matches("cat", "CHANGELOG.md"));
+        assert!(!ext_pattern.matches("cat", "script.sh"));
+
+        // Test 8: matches_all validates entire argument list
+        let all_pattern = ArgPattern::new("ls", vec!["-*".to_string(), "*.rs".to_string()]);
+        assert!(all_pattern.matches_all("ls", &["-la", "main.rs"]));
+        assert!(!all_pattern.matches_all("ls", &["-la", "main.py"])); // .py not allowed
+    }
+
+    /// AC: TOML parsing works for [plugin.host_capabilities.cli] section
+    /// Validates that CLI capability can be declared in the nested manifest format.
+    #[test]
+    fn test_parse_nested_host_capabilities_cli_section() {
+        let toml_str = r#"
+[plugin]
+name = "cli-plugin"
+version = "1.0.0"
+wasm_path = "plugin.wasm"
+capabilities = ["tool"]
+
+[plugin.host_capabilities.cli]
+allowed_commands = ["git", "npm", "cargo"]
+allowed_env = ["PATH", "HOME", "RUST_LOG"]
+timeout_ms = 60000
+max_output_bytes = 2097152
+max_concurrent = 2
+rate_limit_per_minute = 30
+
+[[plugin.host_capabilities.cli.allowed_args]]
+command = "git"
+patterns = ["push", "pull", "--*"]
+
+[[plugin.host_capabilities.cli.allowed_args]]
+command = "cargo"
+patterns = ["build", "test", "--release", "--*"]
+"#;
+        let manifest = PluginManifest::parse(toml_str).unwrap();
+
+        assert_eq!(manifest.name, "cli-plugin");
+
+        let cli = manifest
+            .host_capabilities
+            .cli
+            .as_ref()
+            .expect("cli capability should be present");
+
+        // Verify allowed_commands
+        assert_eq!(cli.allowed_commands, vec!["git", "npm", "cargo"]);
+
+        // Verify allowed_env
+        assert_eq!(cli.allowed_env, vec!["PATH", "HOME", "RUST_LOG"]);
+
+        // Verify resource limits
+        assert_eq!(cli.timeout_ms, 60_000);
+        assert_eq!(cli.max_output_bytes, 2_097_152);
+        assert_eq!(cli.max_concurrent, 2);
+        assert_eq!(cli.rate_limit_per_minute, 30);
+
+        // Verify allowed_args patterns
+        assert_eq!(cli.allowed_args.len(), 2);
+
+        let git_pattern = &cli.allowed_args[0];
+        assert_eq!(git_pattern.command, "git");
+        assert_eq!(git_pattern.patterns, vec!["push", "pull", "--*"]);
+
+        let cargo_pattern = &cli.allowed_args[1];
+        assert_eq!(cargo_pattern.command, "cargo");
+        assert_eq!(
+            cargo_pattern.patterns,
+            vec!["build", "test", "--release", "--*"]
+        );
+    }
+
+    /// Validates that CLI capability uses defaults when only some fields specified.
+    #[test]
+    fn test_parse_nested_host_capabilities_cli_with_defaults() {
+        let toml_str = r#"
+[plugin]
+name = "cli-defaults"
+version = "0.1.0"
+wasm_path = "plugin.wasm"
+capabilities = ["tool"]
+
+[plugin.host_capabilities.cli]
+allowed_commands = ["echo"]
+"#;
+        let manifest = PluginManifest::parse(toml_str).unwrap();
+
+        let cli = manifest
+            .host_capabilities
+            .cli
+            .as_ref()
+            .expect("cli capability should be present");
+
+        // Specified field
+        assert_eq!(cli.allowed_commands, vec!["echo"]);
+
+        // Default values
+        assert!(cli.allowed_args.is_empty());
+        assert!(cli.allowed_env.is_empty());
+        assert_eq!(cli.timeout_ms, DEFAULT_CLI_TIMEOUT_MS);
+        assert_eq!(cli.max_output_bytes, DEFAULT_CLI_MAX_OUTPUT_BYTES);
+        assert_eq!(cli.max_concurrent, DEFAULT_CLI_MAX_CONCURRENT);
+        assert_eq!(cli.rate_limit_per_minute, DEFAULT_CLI_RATE_LIMIT_PER_MINUTE);
+    }
+
+    /// Validates that empty host_capabilities.cli results in None.
+    #[test]
+    fn test_parse_nested_without_host_capabilities_cli() {
+        let toml_str = r#"
+[plugin]
+name = "no-cli"
+version = "0.1.0"
+wasm_path = "plugin.wasm"
+capabilities = ["tool"]
+"#;
+        let manifest = PluginManifest::parse(toml_str).unwrap();
+
+        assert!(
+            manifest.host_capabilities.cli.is_none(),
+            "cli capability should be None when not specified"
+        );
+    }
+
+    // ── ArgPattern::has_wildcards tests ──────────────────────────────────────
+
+    #[test]
+    fn arg_pattern_has_wildcards_detects_star() {
+        let pattern = ArgPattern::new("cmd", vec!["*".to_string()]);
+        assert!(pattern.has_wildcards());
+
+        let pattern = ArgPattern::new("cmd", vec!["*.txt".to_string()]);
+        assert!(pattern.has_wildcards());
+
+        let pattern = ArgPattern::new("cmd", vec!["src/*".to_string()]);
+        assert!(pattern.has_wildcards());
+    }
+
+    #[test]
+    fn arg_pattern_has_wildcards_detects_question_mark() {
+        let pattern = ArgPattern::new("cmd", vec!["-?".to_string()]);
+        assert!(pattern.has_wildcards());
+
+        let pattern = ArgPattern::new("cmd", vec!["file?.txt".to_string()]);
+        assert!(pattern.has_wildcards());
+    }
+
+    #[test]
+    fn arg_pattern_has_wildcards_detects_character_class() {
+        let pattern = ArgPattern::new("cmd", vec!["file[123].txt".to_string()]);
+        assert!(pattern.has_wildcards());
+
+        let pattern = ArgPattern::new("cmd", vec!["-[vVh]".to_string()]);
+        assert!(pattern.has_wildcards());
+    }
+
+    #[test]
+    fn arg_pattern_has_wildcards_returns_false_for_exact() {
+        let pattern = ArgPattern::new(
+            "git",
+            vec![
+                "status".to_string(),
+                "log".to_string(),
+                "--verbose".to_string(),
+            ],
+        );
+        assert!(!pattern.has_wildcards());
+    }
+
+    #[test]
+    fn arg_pattern_has_wildcards_checks_all_patterns() {
+        // Even if first pattern is exact, wildcard in any pattern should return true
+        let pattern = ArgPattern::new("cmd", vec!["exact".to_string(), "*.txt".to_string()]);
+        assert!(pattern.has_wildcards());
+    }
+
+    #[test]
+    fn arg_pattern_has_wildcards_empty_patterns() {
+        let pattern = ArgPattern::new("cmd", vec![]);
+        assert!(!pattern.has_wildcards());
+    }
+
+    // ── ArgPattern::matches_exact tests ──────────────────────────────────────
+
+    #[test]
+    fn arg_pattern_matches_exact_accepts_exact_match() {
+        let pattern = ArgPattern::new(
+            "git",
+            vec![
+                "status".to_string(),
+                "log".to_string(),
+                "--verbose".to_string(),
+            ],
+        );
+        assert!(pattern.matches_exact("git", "status"));
+        assert!(pattern.matches_exact("git", "log"));
+        assert!(pattern.matches_exact("git", "--verbose"));
+    }
+
+    #[test]
+    fn arg_pattern_matches_exact_rejects_non_match() {
+        let pattern = ArgPattern::new("git", vec!["status".to_string()]);
+        assert!(!pattern.matches_exact("git", "push"));
+        assert!(!pattern.matches_exact("git", "stat")); // partial match
+        assert!(!pattern.matches_exact("git", "Status")); // case sensitive
+    }
+
+    #[test]
+    fn arg_pattern_matches_exact_rejects_wrong_command() {
+        let pattern = ArgPattern::new("git", vec!["status".to_string()]);
+        assert!(!pattern.matches_exact("npm", "status"));
+    }
+
+    #[test]
+    fn arg_pattern_matches_exact_treats_wildcards_literally() {
+        // In exact mode, "*" should only match the literal string "*"
+        let pattern = ArgPattern::new("cmd", vec!["*".to_string()]);
+        assert!(pattern.matches_exact("cmd", "*")); // literal * matches
+        assert!(!pattern.matches_exact("cmd", "anything")); // but not as glob
+        assert!(!pattern.matches_exact("cmd", "foo"));
+    }
+
+    #[test]
+    fn arg_pattern_matches_exact_empty_patterns() {
+        let pattern = ArgPattern::new("cmd", vec![]);
+        assert!(!pattern.matches_exact("cmd", "anything"));
+    }
+
+    // ── get_broad_patterns tests ────────────────────────────────────────────────
+
+    #[test]
+    fn arg_pattern_get_broad_patterns_detects_trailing_star() {
+        let pattern = ArgPattern::new(
+            "npm",
+            vec![
+                "install".to_string(),
+                "--save*".to_string(),
+                "-D".to_string(),
+            ],
+        );
+        let broad = pattern.get_broad_patterns();
+        assert_eq!(broad, vec!["--save*"]);
+    }
+
+    #[test]
+    fn arg_pattern_get_broad_patterns_detects_standalone_star() {
+        let pattern = ArgPattern::new("git", vec!["*".to_string()]);
+        let broad = pattern.get_broad_patterns();
+        assert_eq!(broad, vec!["*"]);
+    }
+
+    #[test]
+    fn arg_pattern_get_broad_patterns_detects_multiple_broad() {
+        let pattern = ArgPattern::new(
+            "cmd",
+            vec![
+                "-*".to_string(),
+                "--verbose".to_string(),
+                "file*".to_string(),
+            ],
+        );
+        let broad = pattern.get_broad_patterns();
+        assert_eq!(broad, vec!["-*", "file*"]);
+    }
+
+    #[test]
+    fn arg_pattern_get_broad_patterns_returns_empty_for_exact_only() {
+        let pattern = ArgPattern::new(
+            "git",
+            vec![
+                "status".to_string(),
+                "log".to_string(),
+                "--oneline".to_string(),
+            ],
+        );
+        let broad = pattern.get_broad_patterns();
+        assert!(broad.is_empty());
+    }
+
+    #[test]
+    fn arg_pattern_get_broad_patterns_ignores_middle_star() {
+        // Patterns with '*' in the middle (not ending with it) are not considered broad
+        let pattern = ArgPattern::new("ls", vec!["*.txt".to_string(), "file?.log".to_string()]);
+        let broad = pattern.get_broad_patterns();
+        // "*.txt" ends with "txt" not "*", so it's not broad
+        // "file?.log" doesn't end with "*" either
+        assert!(broad.is_empty());
+    }
+
+    #[test]
+    fn arg_pattern_get_broad_patterns_empty_patterns() {
+        let pattern = ArgPattern::new("cmd", vec![]);
+        let broad = pattern.get_broad_patterns();
+        assert!(broad.is_empty());
     }
 }

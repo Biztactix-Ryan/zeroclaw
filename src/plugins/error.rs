@@ -60,6 +60,11 @@ pub enum PluginError {
     )]
     WildcardDelegationRejected { plugin: String, level: String },
 
+    #[error(
+        "plugin '{plugin}' declares wildcard CLI command '{command}' which is forbidden at all security levels"
+    )]
+    WildcardCliCommandRejected { plugin: String, command: String },
+
     #[error("plugin '{plugin}' declares forbidden path '{path}' in allowed_paths")]
     ForbiddenPath { plugin: String, path: String },
 

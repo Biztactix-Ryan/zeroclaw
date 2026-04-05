@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Package, Shield, Globe, FolderOpen, Settings, Wrench, Lock, CheckCircle, XCircle, ShieldCheck, Pencil, Save, X } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowLeft, Loader2, Package, Shield, Globe, FolderOpen, Settings, Wrench, Lock, CheckCircle, XCircle, ShieldCheck, Pencil, Save, Trash2, X } from 'lucide-react';
 import type { Plugin, PluginToolDef } from '@/types/api';
-import { getPlugin, patchPluginConfig } from '@/lib/api';
+import { getPlugin, patchPluginConfig, removePlugin } from '@/lib/api';
 import { t } from '@/lib/i18n';
 
 function riskBadge(level: PluginToolDef['risk_level']) {
@@ -200,9 +200,12 @@ function ConfigSection({ plugin, onConfigSaved }: { plugin: Plugin; onConfigSave
 
 export default function PluginDetail() {
   const { name } = useParams<{ name: string }>();
+  const navigate = useNavigate();
   const [plugin, setPlugin] = useState<Plugin | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
 
   useEffect(() => {
     if (!name) return;
@@ -218,6 +221,29 @@ export default function PluginDetail() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [name]);
+
+  const handleRemove = async () => {
+    if (!plugin || isRemoving) return;
+    setIsRemoving(true);
+    try {
+      const result = await removePlugin(plugin.name);
+      if (result.ok) {
+        navigate('/plugins');
+      } else {
+        setError(result.error ?? t('plugin.remove_error'));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('plugin.remove_error'));
+    } finally {
+      setIsRemoving(false);
+      setShowRemoveModal(false);
+    }
+  };
+
+  const closeRemoveModal = () => {
+    if (isRemoving) return;
+    setShowRemoveModal(false);
+  };
 
   if (loading) {
     return (
@@ -267,15 +293,31 @@ export default function PluginDetail() {
               </p>
             </div>
           </div>
-          <span
-            className="flex-shrink-0 inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold border"
-            style={plugin.status === 'loaded'
-              ? { color: 'var(--color-status-success)', background: 'rgba(0, 230, 138, 0.06)', borderColor: 'rgba(0, 230, 138, 0.2)' }
-              : { color: 'var(--pc-text-muted)', background: 'transparent', borderColor: 'var(--pc-border)' }
-            }
-          >
-            {plugin.status === 'loaded' ? t('plugin.status_loaded') : t('plugin.status_discovered')}
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowRemoveModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-[rgba(239,68,68,0.1)]"
+              style={{
+                color: '#f87171',
+                borderColor: 'rgba(239, 68, 68, 0.3)',
+                background: 'transparent',
+              }}
+              title={t('plugin.remove')}
+              aria-label={t('plugin.remove')}
+            >
+              <Trash2 className="h-3.5 w-3.5 lucide-trash-2" />
+              {t('plugin.remove')}
+            </button>
+            <span
+              className="flex-shrink-0 inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold border"
+              style={plugin.status === 'loaded'
+                ? { color: 'var(--color-status-success)', background: 'rgba(0, 230, 138, 0.06)', borderColor: 'rgba(0, 230, 138, 0.2)' }
+                : { color: 'var(--pc-text-muted)', background: 'transparent', borderColor: 'var(--pc-border)' }
+              }
+            >
+              {plugin.status === 'loaded' ? t('plugin.status_loaded') : t('plugin.status_discovered')}
+            </span>
+          </div>
         </div>
         {plugin.description && (
           <p className="text-sm mt-3" style={{ color: 'var(--pc-text-muted)' }}>
@@ -498,6 +540,89 @@ export default function PluginDetail() {
           })()}
         </div>
       </div>
+
+      {/* Remove Plugin Confirmation Modal */}
+      {showRemoveModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('plugin.remove_title')}
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={closeRemoveModal}
+        >
+          <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }} />
+          <div
+            className="relative w-full max-w-md mx-4 rounded-2xl border shadow-2xl animate-fade-in"
+            style={{ background: 'var(--pc-bg-base)', borderColor: 'var(--pc-border)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-5 py-4 border-b"
+              style={{ borderColor: 'var(--pc-border)' }}
+            >
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={18} style={{ color: '#f87171' }} />
+                <h2 className="text-sm font-semibold" style={{ color: 'var(--pc-text-primary)' }}>
+                  {t('plugin.remove_title')}
+                </h2>
+              </div>
+              <button
+                onClick={closeRemoveModal}
+                disabled={isRemoving}
+                className="h-7 w-7 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50"
+                style={{ color: 'var(--pc-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-4">
+              <p className="text-sm" style={{ color: 'var(--pc-text-muted)' }}>
+                {t('plugin.remove_message').replace('{name}', plugin.name)}
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex items-center justify-end gap-2 px-5 py-4 border-t"
+              style={{ borderColor: 'var(--pc-border)' }}
+            >
+              <button
+                onClick={closeRemoveModal}
+                disabled={isRemoving}
+                className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50"
+                style={{
+                  background: 'transparent',
+                  borderColor: 'var(--pc-border)',
+                  color: 'var(--pc-text-muted)',
+                }}
+                aria-label={t('plugin.remove_cancel')}
+              >
+                {t('plugin.remove_cancel')}
+              </button>
+              <button
+                onClick={handleRemove}
+                disabled={isRemoving}
+                className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 flex items-center gap-2"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.9)',
+                  borderColor: 'rgba(239, 68, 68, 0.9)',
+                  color: 'white',
+                }}
+                aria-label={t('plugin.remove_confirm')}
+              >
+                {isRemoving && (
+                  <Loader2 size={14} className="animate-spin" />
+                )}
+                {isRemoving ? t('plugin.removing') : t('plugin.remove_confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

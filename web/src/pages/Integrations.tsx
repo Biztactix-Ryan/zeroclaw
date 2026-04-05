@@ -161,8 +161,8 @@ export default function Integrations() {
                   <span
                     className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border"
                     style={plugin.status === 'loaded'
-                      ? { color: 'var(--color-status-success)', border: 'rgba(0, 230, 138, 0.2)', bg: 'rgba(0, 230, 138, 0.06)' }
-                      : { color: 'var(--pc-text-muted)', border: 'var(--pc-border)', bg: 'transparent' }
+                      ? { color: 'var(--color-status-success)', borderColor: 'rgba(0, 230, 138, 0.2)', background: 'rgba(0, 230, 138, 0.06)' }
+                      : { color: 'var(--pc-text-muted)', borderColor: 'var(--pc-border)', background: 'transparent' }
                     }
                   >
                     <Check className="h-3 w-3" />

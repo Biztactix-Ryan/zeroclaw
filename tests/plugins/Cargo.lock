@@ -51,6 +51,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cli-bad-actor-plugin"
+version = "0.1.0"
+dependencies = [
+ "extism-pdk",
+ "serde",
+ "serde_json",
+ "zeroclaw-plugin-sdk",
+]
+
+[[package]]
+name = "cli-plugin"
+version = "0.1.0"
+dependencies = [
+ "extism-pdk",
+ "serde",
+ "serde_json",
+ "zeroclaw-plugin-sdk",
+]
+
+[[package]]
 name = "echo-plugin"
 version = "0.1.0"
 dependencies = [
