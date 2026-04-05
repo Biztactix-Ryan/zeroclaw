@@ -12,7 +12,6 @@ import type {
   Session,
   ChannelDetail,
   SessionMessagesResponse,
-  Plugin,
   PluginDetail,
   PluginsResponse,
 } from '../types/api';
@@ -267,6 +266,34 @@ export function disablePlugin(name: string): Promise<PluginDetail> {
   });
 }
 
+export interface ReloadPluginsResponse {
+  ok: boolean;
+  total?: number;
+  loaded?: string[];
+  unloaded?: string[];
+  error?: string;
+}
+
+export function reloadPlugins(): Promise<ReloadPluginsResponse> {
+  return apiFetch<ReloadPluginsResponse>('/api/plugins/reload', {
+    method: 'POST',
+  });
+}
+
+export interface InstallPluginResponse {
+  ok: boolean;
+  message?: string;
+  plugin_name?: string;
+  error?: string;
+}
+
+export function installPlugin(source: string): Promise<InstallPluginResponse> {
+  return apiFetch<InstallPluginResponse>('/api/plugins/install', {
+    method: 'POST',
+    body: JSON.stringify({ source }),
+  });
+}
+
 export function patchPluginConfig(
   name: string,
   config: Record<string, string>,
@@ -276,6 +303,21 @@ export function patchPluginConfig(
     {
       method: 'PATCH',
       body: JSON.stringify(config),
+    },
+  );
+}
+
+export interface RemovePluginResponse {
+  ok: boolean;
+  message?: string;
+  error?: string;
+}
+
+export function removePlugin(name: string): Promise<RemovePluginResponse> {
+  return apiFetch<RemovePluginResponse>(
+    `/api/plugins/${encodeURIComponent(name)}`,
+    {
+      method: 'DELETE',
     },
   );
 }

@@ -1017,8 +1017,17 @@ pub async fn run_gateway(
             get(api_plugins::plugin_routes::list_plugins),
         )
         .route(
+            "/api/plugins/reload",
+            post(api_plugins::plugin_routes::reload_plugins),
+        )
+        .route(
+            "/api/plugins/install",
+            post(api_plugins::plugin_routes::install_plugin),
+        )
+        .route(
             "/api/plugins/{name}",
-            get(api_plugins::plugin_routes::get_plugin_detail),
+            get(api_plugins::plugin_routes::get_plugin_detail)
+                .delete(api_plugins::plugin_routes::remove_plugin),
         )
         .route(
             "/api/plugins/{name}/enable",

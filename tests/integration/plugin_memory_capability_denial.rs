@@ -186,6 +186,7 @@ fn all_non_memory_capabilities_still_deny_memory() {
             user_identity: true,
             agent_config: true,
         }),
+        cli: None,
     });
 
     let fns = registry.build_functions(&manifest);

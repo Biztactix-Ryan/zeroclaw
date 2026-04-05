@@ -23,7 +23,11 @@
 use crate::channels::traits::{Channel, SendMessage};
 use crate::memory::traits::{Memory, MemoryCategory};
 use crate::plugins::PluginManifest;
-use crate::security::audit::AuditLogger;
+use crate::security::audit::{AuditLogger, CliAuditEntry};
+use crate::security::{
+    validate_arguments, validate_arguments_strict, validate_command_allowlist,
+    validate_path_traversal, warn_broad_cli_patterns,
+};
 use crate::tools::traits::RiskLevel;
 use crate::tools::traits::Tool;
 use extism::Function;
@@ -34,7 +38,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// Maximum allowed nesting depth for `zeroclaw_tool_call` host function
@@ -112,6 +119,68 @@ impl ChannelRateLimiter {
 
         timestamps.push(Instant::now());
         Ok(())
+    }
+}
+
+/// Sliding-window rate limiter for CLI executions, keyed by plugin name.
+///
+/// Each plugin gets an independent execution budget within a 1-minute window.
+/// The rate limit is configured per-plugin via `rate_limit_per_minute` in the
+/// plugin manifest. Thread-safe via `parking_lot::Mutex`.
+pub struct CliRateLimiter {
+    /// Window duration (1 minute).
+    window: Duration,
+    /// Recorded timestamps keyed by plugin_name.
+    state: Mutex<HashMap<String, Vec<Instant>>>,
+}
+
+impl CliRateLimiter {
+    /// Create a new CLI rate limiter with a 1-minute sliding window.
+    pub fn new() -> Self {
+        Self {
+            window: Duration::from_secs(60),
+            state: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Record a CLI execution attempt. Returns `Ok(())` if within budget,
+    /// `Err(retry_after_secs)` if rate-limited.
+    ///
+    /// # Arguments
+    /// * `plugin_name` - Name of the plugin attempting execution
+    /// * `limit_per_minute` - Maximum executions allowed per minute (0 = unlimited)
+    pub fn record_execution(&self, plugin_name: &str, limit_per_minute: u32) -> Result<(), u64> {
+        if limit_per_minute == 0 {
+            return Ok(()); // No limit configured
+        }
+
+        let mut state = self.state.lock();
+        let timestamps = state.entry(plugin_name.to_string()).or_default();
+
+        let now = Instant::now();
+        let cutoff = now.checked_sub(self.window).unwrap_or(now);
+        timestamps.retain(|t| *t > cutoff);
+
+        if timestamps.len() as u32 >= limit_per_minute {
+            // Calculate time until oldest request expires
+            if let Some(oldest) = timestamps.first() {
+                if let Some(expires_at) = oldest.checked_add(self.window) {
+                    if let Some(wait) = expires_at.checked_duration_since(now) {
+                        return Err(wait.as_secs().saturating_add(1));
+                    }
+                }
+            }
+            return Err(60); // Fallback: wait full window
+        }
+
+        timestamps.push(now);
+        Ok(())
+    }
+}
+
+impl Default for CliRateLimiter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -348,6 +417,41 @@ pub struct AgentConfigResponse {
     pub identity: HashMap<String, String>,
 }
 
+/// JSON input for the `zeroclaw_cli_exec` host function.
+///
+/// Requests execution of a CLI command with specified arguments,
+/// working directory, and environment variables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliExecRequest {
+    /// The command to execute (e.g., "git", "npm").
+    pub command: String,
+    /// Arguments to pass to the command.
+    pub args: Vec<String>,
+    /// Working directory for command execution.
+    /// Must be within the plugin's allowed_paths.
+    pub working_dir: Option<String>,
+    /// Environment variables to set for the command.
+    /// Only variables in the plugin's allowed_env list will be applied.
+    pub env: Option<HashMap<String, String>>,
+}
+
+/// JSON output for the `zeroclaw_cli_exec` host function.
+///
+/// Contains the captured output and status of the executed command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliExecResponse {
+    /// Standard output from the command.
+    pub stdout: String,
+    /// Standard error from the command.
+    pub stderr: String,
+    /// Exit code returned by the command.
+    pub exit_code: i32,
+    /// Whether the output was truncated due to size limits.
+    pub truncated: bool,
+    /// Whether the command was terminated due to timeout.
+    pub timed_out: bool,
+}
+
 /// Shared state passed into the `context_agent_config` host function callback
 /// via Extism's `UserData`.
 struct AgentConfigData {
@@ -367,6 +471,51 @@ struct MemoryForgetData {
     plugin_name: String,
 }
 
+/// Shared state passed into the `zeroclaw_cli_exec` host function callback
+/// via Extism's `UserData`.
+///
+/// Made public to enable integration testing of CLI execution resource limits.
+#[derive(Clone)]
+pub struct CliExecData {
+    /// Plugin name for error messages and audit logging.
+    pub plugin_name: String,
+    /// Allowed commands the plugin can execute.
+    pub allowed_commands: Vec<String>,
+    /// Argument patterns for command validation.
+    pub allowed_args: Vec<super::ArgPattern>,
+    /// Environment variables the plugin is allowed to pass through.
+    pub allowed_env: Vec<String>,
+    /// Plugin's allowed filesystem paths (logical name -> physical path).
+    pub allowed_paths: std::collections::HashMap<String, String>,
+    /// Command timeout in milliseconds.
+    pub timeout_ms: u64,
+    /// Maximum output size in bytes before truncation.
+    pub max_output_bytes: usize,
+    /// Maximum concurrent CLI executions allowed for this plugin.
+    pub max_concurrent: usize,
+    /// Current count of active CLI executions (shared across all calls).
+    pub concurrent_count: Arc<AtomicUsize>,
+    /// Audit logger for recording CLI executions.
+    pub audit: Arc<AuditLogger>,
+    /// Shared CLI rate limiter for tracking executions per plugin.
+    pub cli_rate_limiter: Arc<CliRateLimiter>,
+    /// Maximum CLI executions allowed per minute for this plugin.
+    pub rate_limit_per_minute: u32,
+    /// Network security level for validation strictness.
+    pub security_level: super::loader::NetworkSecurityLevel,
+}
+
+/// RAII guard that decrements the concurrent execution counter when dropped.
+struct ConcurrencyGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for ConcurrencyGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Registry of host-defined functions that WASM plugins can call.
 ///
 /// Holds shared references to ZeroClaw subsystems so host functions can
@@ -382,6 +531,8 @@ pub struct HostFunctionRegistry {
     pub channels: HashMap<String, Arc<dyn Channel>>,
     /// Per-plugin per-channel rate limiter for messaging.
     pub channel_rate_limiter: Arc<ChannelRateLimiter>,
+    /// Per-plugin rate limiter for CLI executions.
+    pub cli_rate_limiter: Arc<CliRateLimiter>,
     /// Current session context snapshot exposed to plugins via `context_session`.
     pub session_context: Arc<Mutex<SessionContextResponse>>,
     /// Current user identity snapshot exposed to plugins via `context_user_identity`.
@@ -399,12 +550,15 @@ impl HostFunctionRegistry {
     ) -> Self {
         // Default rate limiter: 60 messages per plugin per channel per hour.
         let channel_rate_limiter = Arc::new(ChannelRateLimiter::new(60, 3600));
+        // CLI rate limiter: per-plugin limits are configured in manifests.
+        let cli_rate_limiter = Arc::new(CliRateLimiter::new());
         Self {
             memory,
             tools,
             audit,
             channels: HashMap::new(),
             channel_rate_limiter,
+            cli_rate_limiter,
             session_context: Arc::new(Mutex::new(SessionContextResponse::default())),
             user_identity: Arc::new(Mutex::new(UserIdentityResponse::default())),
             agent_config: Arc::new(Mutex::new(AgentConfigResponse::default())),
@@ -505,6 +659,24 @@ impl HostFunctionRegistry {
                 limiter,
             ));
             fns.push(self.make_zeroclaw_get_channels_fn(msg.allowed_channels.clone()));
+        }
+
+        // CLI execution — 1 function.
+        // Paranoid mode denies ALL CLI execution regardless of manifest flags.
+        if let Some(ref cli) = caps.cli {
+            if security_level == crate::plugins::loader::NetworkSecurityLevel::Paranoid {
+                tracing::warn!(
+                    plugin = %manifest.name,
+                    "plugin declares CLI capability but security level is Paranoid; denying CLI access"
+                );
+            } else {
+                fns.push(self.make_zeroclaw_cli_exec_fn(
+                    &manifest.name,
+                    cli.clone(),
+                    manifest.allowed_paths.clone(),
+                    security_level,
+                ));
+            }
         }
 
         // Context — up to 3 functions (session / user_identity / agent_config).
@@ -1098,6 +1270,157 @@ impl HostFunctionRegistry {
         )
     }
 
+    /// Build the `zeroclaw_cli_exec` host function for a specific plugin.
+    ///
+    /// The function reads a JSON `CliExecRequest` payload from Extism shared memory,
+    /// validates the command and arguments against the plugin's CLI capability config,
+    /// spawns the process via `std::process::Command` (no shell), captures output,
+    /// and returns a `CliExecResponse`.
+    ///
+    /// # Security
+    ///
+    /// - Commands are validated against the plugin's `allowed_commands` list
+    /// - Arguments are validated against `allowed_args` patterns and checked for
+    ///   shell metacharacters and path traversal
+    /// - Working directory must be within the plugin's `allowed_paths`
+    /// - Environment variables are filtered to only allow those in `allowed_env`
+    /// - Output is truncated if it exceeds `max_output_bytes`
+    /// - Commands are killed if they exceed `timeout_ms`
+    fn make_zeroclaw_cli_exec_fn(
+        &self,
+        plugin_name: &str,
+        cli_cap: super::CliCapability,
+        allowed_paths: std::collections::HashMap<String, String>,
+        security_level: super::loader::NetworkSecurityLevel,
+    ) -> Function {
+        let data = CliExecData {
+            plugin_name: plugin_name.to_string(),
+            allowed_commands: cli_cap.allowed_commands,
+            allowed_args: cli_cap.allowed_args,
+            allowed_env: cli_cap.allowed_env,
+            allowed_paths,
+            timeout_ms: cli_cap.timeout_ms,
+            max_output_bytes: cli_cap.max_output_bytes,
+            max_concurrent: cli_cap.max_concurrent,
+            concurrent_count: Arc::new(AtomicUsize::new(0)),
+            audit: Arc::clone(&self.audit),
+            cli_rate_limiter: Arc::clone(&self.cli_rate_limiter),
+            rate_limit_per_minute: cli_cap.rate_limit_per_minute,
+            security_level,
+        };
+        Function::new(
+            "zeroclaw_cli_exec",
+            [ValType::I64], // input: memory handle with JSON payload
+            [ValType::I64], // output: memory handle with JSON response
+            UserData::new(data),
+            |plugin, inputs, outputs, user_data| {
+                let data_lock = user_data.get()?;
+                let data = data_lock
+                    .lock()
+                    .map_err(|e| extism::Error::msg(format!("failed to lock user data: {e}")))?;
+
+                // Read JSON input from shared memory
+                let input_bytes: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
+                let request: CliExecRequest =
+                    serde_json::from_slice(&input_bytes).map_err(|e| {
+                        extism::Error::msg(format!("invalid zeroclaw_cli_exec input: {e}"))
+                    })?;
+
+                // Check rate limit before proceeding
+                if let Err(retry_after) = data
+                    .cli_rate_limiter
+                    .record_execution(&data.plugin_name, data.rate_limit_per_minute)
+                {
+                    let response = CliExecResponse {
+                        stdout: String::new(),
+                        stderr: format!(
+                            "[plugin:{}] rate limit exceeded ({} executions/minute). Retry after {} seconds.",
+                            data.plugin_name, data.rate_limit_per_minute, retry_after
+                        ),
+                        exit_code: -1,
+                        truncated: false,
+                        timed_out: false,
+                    };
+                    let response_bytes = serde_json::to_vec(&response)
+                        .expect("CliExecResponse serialization is infallible");
+                    let handle = plugin.memory_new(&response_bytes)?;
+                    outputs[0] = plugin.memory_to_val(handle);
+                    return Ok(());
+                }
+
+                // Check concurrent execution limit before proceeding
+                loop {
+                    let current = data.concurrent_count.load(Ordering::SeqCst);
+                    if current >= data.max_concurrent {
+                        // Limit reached, return error response
+                        let response = CliExecResponse {
+                            stdout: String::new(),
+                            stderr: format!(
+                                "[plugin:{}] concurrent execution limit reached ({}/{})",
+                                data.plugin_name, current, data.max_concurrent
+                            ),
+                            exit_code: -1,
+                            truncated: false,
+                            timed_out: false,
+                        };
+                        let response_bytes = serde_json::to_vec(&response)
+                            .expect("CliExecResponse serialization is infallible");
+                        let handle = plugin.memory_new(&response_bytes)?;
+                        outputs[0] = plugin.memory_to_val(handle);
+                        return Ok(());
+                    }
+                    // Try to increment the counter atomically
+                    if data
+                        .concurrent_count
+                        .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                    {
+                        break;
+                    }
+                    // CAS failed, another thread incremented - retry
+                }
+
+                // RAII guard ensures counter is decremented even on panic/early return
+                let _guard = ConcurrencyGuard {
+                    counter: Arc::clone(&data.concurrent_count),
+                };
+
+                // Capture start time for duration measurement
+                let start_time = Instant::now();
+
+                // Execute the CLI command with validation
+                let response = execute_cli_command(&data, &request);
+
+                // Calculate duration and log the CLI execution
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                let output_bytes = response.stdout.len() + response.stderr.len();
+                let audit_entry = CliAuditEntry::new(
+                    &data.plugin_name,
+                    &request.command,
+                    &request.args,
+                    request.working_dir.clone(),
+                    response.exit_code,
+                    duration_ms,
+                    output_bytes,
+                    response.truncated,
+                    response.timed_out,
+                );
+
+                // Log to audit trail (ignore errors to avoid failing the CLI call)
+                let _ = data.audit.log_cli(&audit_entry);
+
+                // Encode response as JSON and write to shared memory
+                let response_bytes = serde_json::to_vec(&response)
+                    .expect("CliExecResponse serialization is infallible");
+
+                let handle = plugin.memory_new(&response_bytes)?;
+                outputs[0] = plugin.memory_to_val(handle);
+
+                Ok(())
+            },
+        )
+    }
+
     /// Create a placeholder host function with the given name.
     ///
     /// The function accepts no WASM-level parameters and returns no values.
@@ -1111,5 +1434,315 @@ impl HostFunctionRegistry {
             UserData::new(()),
             |_plugin, _inputs, _outputs, _user_data| Ok(()),
         )
+    }
+}
+
+/// Execute a CLI command with validation and security checks.
+///
+/// This function performs the following steps:
+/// 1. Validates the command against the plugin's allowed commands list
+/// 2. Validates arguments against allowed patterns and checks for shell metacharacters
+/// 3. Validates path traversal in arguments
+/// 4. Validates working directory is within allowed paths
+/// 5. Sanitizes environment variables to only include allowed ones
+/// 6. Spawns the process via `std::process::Command` (no shell)
+/// 7. Captures stdout and stderr with size limits
+/// 8. Handles command timeout
+///
+/// Made public to enable integration testing of CLI execution resource limits.
+pub fn execute_cli_command(data: &CliExecData, request: &CliExecRequest) -> CliExecResponse {
+    // Step 1: Validate command against allowed_commands list and resolve to path
+    let command_path = match validate_command_allowlist(&request.command, &data.allowed_commands) {
+        Ok(path) => path,
+        Err(e) => {
+            return CliExecResponse {
+                stdout: String::new(),
+                stderr: format!(
+                    "[plugin:{}] command validation failed: {}",
+                    data.plugin_name, e
+                ),
+                exit_code: -1,
+                truncated: false,
+                timed_out: false,
+            };
+        }
+    };
+
+    // Step 2: Validate arguments against allowed patterns and shell metacharacters
+    // At Strict level, use exact matching (no glob patterns allowed)
+    // At Default level, allow glob patterns but log warnings for broad ones
+    let args_refs: Vec<&str> = request.args.iter().map(|s| s.as_str()).collect();
+
+    let validation_result = if data.security_level == super::loader::NetworkSecurityLevel::Strict {
+        validate_arguments_strict(&request.command, &args_refs, &data.allowed_args)
+    } else {
+        // At Default level, warn about broad patterns (e.g., patterns ending in '*')
+        if data.security_level == super::loader::NetworkSecurityLevel::Default {
+            warn_broad_cli_patterns(&data.plugin_name, &request.command, &data.allowed_args);
+        }
+        validate_arguments(&request.command, &args_refs, &data.allowed_args)
+    };
+
+    if let Err(e) = validation_result {
+        return CliExecResponse {
+            stdout: String::new(),
+            stderr: format!(
+                "[plugin:{}] argument validation failed: {}",
+                data.plugin_name, e
+            ),
+            exit_code: -1,
+            truncated: false,
+            timed_out: false,
+        };
+    }
+
+    // Step 3: Validate path traversal in arguments
+    if let Err(e) = validate_path_traversal(&args_refs) {
+        return CliExecResponse {
+            stdout: String::new(),
+            stderr: format!(
+                "[plugin:{}] path traversal rejected: {}",
+                data.plugin_name, e
+            ),
+            exit_code: -1,
+            truncated: false,
+            timed_out: false,
+        };
+    }
+
+    // Step 4: Validate working directory is within allowed paths
+    let working_dir = if let Some(ref wd) = request.working_dir {
+        let wd_path = Path::new(wd);
+
+        // Check if the working directory is within any of the plugin's allowed paths
+        let is_within_allowed = data.allowed_paths.values().any(|allowed_path| {
+            let allowed = Path::new(allowed_path);
+            // Canonicalize both paths to handle symlinks and relative components
+            match (wd_path.canonicalize(), allowed.canonicalize()) {
+                (Ok(wd_canon), Ok(allowed_canon)) => wd_canon.starts_with(&allowed_canon),
+                // If canonicalization fails, fall back to prefix check
+                _ => wd_path.starts_with(allowed),
+            }
+        });
+
+        if !is_within_allowed {
+            return CliExecResponse {
+                stdout: String::new(),
+                stderr: format!(
+                    "[plugin:{}] working directory '{}' is not within plugin's allowed_paths",
+                    data.plugin_name, wd
+                ),
+                exit_code: -1,
+                truncated: false,
+                timed_out: false,
+            };
+        }
+
+        Some(wd_path.to_path_buf())
+    } else {
+        // Default to first allowed_path (sorted alphabetically by key for determinism)
+        data.allowed_paths
+            .keys()
+            .min()
+            .and_then(|key| data.allowed_paths.get(key))
+            .map(|path| PathBuf::from(path))
+    };
+
+    // Step 5: Build the command with sanitized environment
+    let mut cmd = Command::new(&command_path);
+    cmd.args(&request.args);
+
+    // Clear all environment variables and only set allowed ones
+    cmd.env_clear();
+
+    if let Some(ref env) = request.env {
+        for (key, value) in env {
+            // Only pass through environment variables that are in the allowed list
+            if data.allowed_env.contains(key) {
+                cmd.env(key, value);
+            }
+        }
+    }
+
+    // Set working directory if specified
+    if let Some(ref wd) = working_dir {
+        cmd.current_dir(wd);
+    }
+
+    // Step 6: Spawn the process and capture output with timeout
+    let timeout = Duration::from_millis(data.timeout_ms);
+    let start_time = Instant::now();
+
+    // Use spawn + wait_with_output pattern for better timeout handling
+    let child = match cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => {
+            return CliExecResponse {
+                stdout: String::new(),
+                stderr: format!(
+                    "[plugin:{}] failed to spawn command '{}': {}",
+                    data.plugin_name, request.command, e
+                ),
+                exit_code: -1,
+                truncated: false,
+                timed_out: false,
+            };
+        }
+    };
+
+    // Wait for the child process with timeout
+    let (output_result, timed_out) = wait_with_timeout(child, timeout, start_time);
+
+    match output_result {
+        Ok(output) => {
+            let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+            // Step 7: Truncate output if it exceeds max_output_bytes
+            let mut truncated = false;
+            if stdout.len() > data.max_output_bytes {
+                stdout.truncate(data.max_output_bytes);
+                stdout.push_str("\n[output truncated]");
+                truncated = true;
+            }
+            if stderr.len() > data.max_output_bytes {
+                stderr.truncate(data.max_output_bytes);
+                stderr.push_str("\n[output truncated]");
+                truncated = true;
+            }
+
+            let exit_code = if timed_out {
+                // Use 128 + 9 (SIGKILL) as the exit code for timeout
+                137
+            } else {
+                output.status.code().unwrap_or(-1)
+            };
+
+            CliExecResponse {
+                stdout,
+                stderr,
+                exit_code,
+                truncated,
+                timed_out,
+            }
+        }
+        Err(e) => CliExecResponse {
+            stdout: String::new(),
+            stderr: format!(
+                "[plugin:{}] command execution failed: {}",
+                data.plugin_name, e
+            ),
+            exit_code: -1,
+            truncated: false,
+            timed_out,
+        },
+    }
+}
+
+/// Wait for a child process with timeout, killing it if necessary.
+///
+/// Returns the output result and whether the process was killed due to timeout.
+fn wait_with_timeout(
+    mut child: std::process::Child,
+    timeout: Duration,
+    start_time: Instant,
+) -> (std::io::Result<std::process::Output>, bool) {
+    // Use a simple polling approach with small sleep intervals
+    let poll_interval = Duration::from_millis(10);
+
+    loop {
+        // Check if the process has finished
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                // Process finished, get the output
+                let output = child.wait_with_output();
+                return (output, false);
+            }
+            Ok(None) => {
+                // Process still running, check timeout
+                if start_time.elapsed() >= timeout {
+                    // Kill the process
+                    let _ = child.kill();
+                    // Wait for it to actually exit and get output
+                    let output = child.wait_with_output();
+                    return (output, true);
+                }
+                // Sleep briefly before polling again
+                std::thread::sleep(poll_interval);
+            }
+            Err(e) => {
+                return (Err(e), false);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_rate_limiter_allows_within_limit() {
+        let limiter = CliRateLimiter::new();
+
+        // Should allow 3 executions when limit is 3
+        assert!(limiter.record_execution("test-plugin", 3).is_ok());
+        assert!(limiter.record_execution("test-plugin", 3).is_ok());
+        assert!(limiter.record_execution("test-plugin", 3).is_ok());
+
+        // 4th should fail
+        assert!(limiter.record_execution("test-plugin", 3).is_err());
+    }
+
+    #[test]
+    fn cli_rate_limiter_zero_limit_allows_all() {
+        let limiter = CliRateLimiter::new();
+
+        // Zero limit means unlimited
+        for _ in 0..100 {
+            assert!(limiter.record_execution("test-plugin", 0).is_ok());
+        }
+    }
+
+    #[test]
+    fn cli_rate_limiter_tracks_per_plugin() {
+        let limiter = CliRateLimiter::new();
+
+        // Each plugin has independent limits
+        assert!(limiter.record_execution("plugin-a", 2).is_ok());
+        assert!(limiter.record_execution("plugin-a", 2).is_ok());
+        assert!(limiter.record_execution("plugin-a", 2).is_err()); // plugin-a exhausted
+
+        // plugin-b still has budget
+        assert!(limiter.record_execution("plugin-b", 2).is_ok());
+        assert!(limiter.record_execution("plugin-b", 2).is_ok());
+        assert!(limiter.record_execution("plugin-b", 2).is_err()); // plugin-b exhausted
+    }
+
+    #[test]
+    fn cli_rate_limiter_returns_retry_after() {
+        let limiter = CliRateLimiter::new();
+
+        // Exhaust the limit
+        assert!(limiter.record_execution("test-plugin", 1).is_ok());
+
+        // Should return retry_after seconds
+        let err = limiter.record_execution("test-plugin", 1).unwrap_err();
+        assert!(
+            err > 0 && err <= 61,
+            "retry_after should be reasonable: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn cli_rate_limiter_default_impl() {
+        // Test Default trait implementation
+        let limiter = CliRateLimiter::default();
+        assert!(limiter.record_execution("test-plugin", 5).is_ok());
     }
 }

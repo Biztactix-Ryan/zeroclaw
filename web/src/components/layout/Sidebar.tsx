@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { basePath } from '../../lib/basePath';
 import {
   LayoutDashboard,
@@ -12,15 +12,35 @@ import {
   Activity,
   Stethoscope,
   Monitor,
+  Blocks,
 } from 'lucide-react';
 import { t } from '@/lib/i18n';
 
-const navItems = [
+interface NavChild {
+  to: string;
+  labelKey: string;
+}
+
+interface NavItem {
+  to: string;
+  icon: typeof LayoutDashboard;
+  labelKey: string;
+  children?: NavChild[];
+}
+
+const navItems: NavItem[] = [
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { to: '/agent', icon: MessageSquare, labelKey: 'nav.agent' },
   { to: '/tools', icon: Wrench, labelKey: 'nav.tools' },
   { to: '/cron', icon: Clock, labelKey: 'nav.cron' },
-  { to: '/integrations', icon: Puzzle, labelKey: 'nav.integrations' },
+  {
+    to: '/integrations',
+    icon: Puzzle,
+    labelKey: 'nav.integrations',
+    children: [
+      { to: '/plugins', labelKey: 'nav.plugins' },
+    ],
+  },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory' },
   { to: '/config', icon: Settings, labelKey: 'nav.config' },
   { to: '/cost', icon: DollarSign, labelKey: 'nav.cost' },
@@ -35,6 +55,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ open, onClose }: SidebarProps) {
+  const location = useLocation();
+
   return (
     <>
       {/* Backdrop — mobile only, visible when sidebar is open */}
@@ -79,35 +101,63 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {navItems.map(({ to, icon: Icon, labelKey }, idx) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              onClick={onClose}
-              className={({ isActive }) =>
-                [
-                  'flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-medium transition-all group',
-                  isActive
-                    ? 'text-[var(--pc-accent-light)]'
-                    : 'text-[var(--pc-text-muted)] hover:text-[var(--pc-text-secondary)] hover:bg-[var(--pc-hover)]',
-                ].join(' ')
-              }
-              style={({ isActive }) => ({
-                animationDelay: `${idx * 40}ms`,
-                ...(isActive ? {
-                  background: 'var(--pc-accent-glow)',
-                  border: '1px solid var(--pc-accent-dim)',
-                } : {}),
-              })}
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon className={`h-5 w-5 flex-shrink-0 transition-colors ${isActive ? 'text-[var(--pc-accent)]' : 'group-hover:text-[var(--pc-accent)]'}`} />
-                  <span>{t(labelKey)}</span>
-                </>
+          {navItems.map(({ to, icon: Icon, labelKey, children }, idx) => (
+            <div key={to}>
+              <NavLink
+                to={to}
+                end={to === '/' || !!children}
+                onClick={onClose}
+                className={({ isActive }) =>
+                  [
+                    'flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-medium transition-all group',
+                    isActive
+                      ? 'text-[var(--pc-accent-light)]'
+                      : 'text-[var(--pc-text-muted)] hover:text-[var(--pc-text-secondary)] hover:bg-[var(--pc-hover)]',
+                  ].join(' ')
+                }
+                style={({ isActive }) => ({
+                  animationDelay: `${idx * 40}ms`,
+                  ...(isActive ? {
+                    background: 'var(--pc-accent-glow)',
+                    border: '1px solid var(--pc-accent-dim)',
+                  } : {}),
+                })}
+              >
+                {({ isActive }) => (
+                  <>
+                    <Icon className={`h-5 w-5 flex-shrink-0 transition-colors ${isActive ? 'text-[var(--pc-accent)]' : 'group-hover:text-[var(--pc-accent)]'}`} />
+                    <span>{t(labelKey)}</span>
+                  </>
+                )}
+              </NavLink>
+              {children && (
+                <div className="ml-6 mt-1 space-y-1">
+                  {children.map((child) => {
+                    const isChildActive = location.pathname === child.to || location.pathname.startsWith(child.to + '/');
+                    return (
+                      <NavLink
+                        key={child.to}
+                        to={child.to}
+                        onClick={onClose}
+                        className={[
+                          'flex items-center gap-2 pl-5 pr-3 py-2 rounded-xl text-sm transition-all group',
+                          isChildActive
+                            ? 'text-[var(--pc-accent-light)]'
+                            : 'text-[var(--pc-text-muted)] hover:text-[var(--pc-text-secondary)] hover:bg-[var(--pc-hover)]',
+                        ].join(' ')}
+                        style={isChildActive ? {
+                          background: 'var(--pc-accent-glow)',
+                          border: '1px solid var(--pc-accent-dim)',
+                        } : {}}
+                      >
+                        <Blocks className={`h-4 w-4 flex-shrink-0 transition-colors ${isChildActive ? 'text-[var(--pc-accent)]' : 'group-hover:text-[var(--pc-accent)]'}`} />
+                        <span>{t(child.labelKey)}</span>
+                      </NavLink>
+                    );
+                  })}
+                </div>
               )}
-            </NavLink>
+            </div>
           ))}
         </nav>
 

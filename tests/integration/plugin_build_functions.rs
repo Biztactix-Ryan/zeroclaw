@@ -150,6 +150,7 @@ fn all_capabilities_produces_all_functions() {
             user_identity: true,
             agent_config: true,
         }),
+        cli: None,
     });
 
     let fns = registry.build_functions(&manifest);

@@ -34,13 +34,11 @@ credentials.json
 .worktrees/
 .zeroclaw/*
 
-# Claude Code configuration (local-only, not pushed to main)
+# Claude Code local config and state
 .claude/
-
-# MCP server configuration (local dev only)
 .mcp.json
 
-# ProjectMan data (local project management state)
+# Project management local state
 .project/
 
 # Local state backups

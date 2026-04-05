@@ -3,6 +3,8 @@ members = [
     "echo-plugin",
     "multi-tool-plugin",
     "bad-actor-plugin",
+    "cli-bad-actor-plugin",
+    "cli-plugin",
     "http-plugin",
     "fs-plugin",
     "sdk-example-plugin",
