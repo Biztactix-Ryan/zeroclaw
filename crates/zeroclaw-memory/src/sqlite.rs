@@ -1062,8 +1062,12 @@ impl KnowledgeStore for SqliteMemory {
         let keyword_weight = self.keyword_weight;
         let relevance_decay_alpha: Option<f64> = None;
 
-        let query_vec: Vec<f32> = embedder.embed_one(query).await?;
-        let query_vec_arc = Arc::new(query_vec);
+        // Embed query for vector search (None if no embedder configured)
+        let query_vec: Option<Arc<Vec<f32>>> = if embedder.dimensions() == 0 {
+            None
+        } else {
+            embedder.embed_one(query).await.ok().map(Arc::new)
+        };
 
         // MAX-fusion: embed query with local model too (if configured)
         let local_query_vec: Option<Arc<Vec<f32>>> = if let Some(ref le) = self.local_embedder {
@@ -1104,9 +1108,9 @@ impl KnowledgeStore for SqliteMemory {
 
         let conn = self.conn.clone();
         let local_qv = local_query_vec;
+        let query_vec_opt = query_vec;
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ChunkResult>> {
             let conn = conn.lock();
-            let query_vec = query_vec_arc.as_ref();
 
             let since_filter = opts_since
                 .as_ref()
@@ -1188,11 +1192,12 @@ impl KnowledgeStore for SqliteMemory {
                 ) = row;
 
                 // Primary model cosine similarity
-                let primary_sim = if let Some(ref blob) = embedding_blob {
-                    let emb = vector::smart_decode(blob);
-                    vector::cosine_similarity(query_vec, &emb)
-                } else {
-                    0.0
+                let primary_sim = match (&query_vec_opt, &embedding_blob) {
+                    (Some(qv), Some(blob)) => {
+                        let emb = vector::smart_decode(blob);
+                        vector::cosine_similarity(qv, &emb)
+                    }
+                    _ => 0.0,
                 };
 
                 // MAX-fusion: check chunk_embeddings for additional model scores
@@ -3503,5 +3508,113 @@ mod tests {
 
         let results = mem.recall("Rust", 10, None, None, None).await.unwrap();
         assert!(!results.is_empty(), "Hybrid mode should find results");
+    }
+
+    // ── NoopEmbedding: memory works without embedding provider ──
+
+    #[tokio::test]
+    async fn noop_store_and_recall_works() {
+        let (_tmp, mem) = temp_sqlite();
+        // NoopEmbedding is the default — store should work
+        mem.store("lang", "Rust is great", MemoryCategory::Core, None)
+            .await
+            .unwrap();
+        // Recall should still work via BM25 keyword search
+        let results = mem.recall("Rust", 5, None, None, None).await.unwrap();
+        assert!(!results.is_empty(), "recall should work without embeddings via BM25");
+        assert_eq!(results[0].key, "lang");
+    }
+
+    #[tokio::test]
+    async fn noop_knowledge_store_index_and_search() {
+        let (_tmp, mem) = temp_sqlite();
+        // Register source + index document should work even without embeddings
+        mem.register_source(SourceRegistration {
+            source_id: "noop-src".into(),
+            display_name: "NoopTest".into(),
+            uri_scheme: "test://".into(),
+            plugin_version: None,
+            config: None,
+        })
+        .await
+        .unwrap();
+
+        let result = mem
+            .index_document(DocumentInput {
+                source_id: "noop-src".into(),
+                source_uri: "test://noop-doc".into(),
+                title: Some("Noop Doc".into()),
+                content_hash: Some("noop1".into()),
+                chunks: vec![ChunkInput {
+                    content: "This document is indexed without any embedding provider configured and should still be searchable via keyword matching".into(),
+                    start_line: Some(1),
+                    end_line: Some(1),
+                    chunk_index: 0,
+                    section_path: None,
+                }],
+                metadata: None,
+            })
+            .await
+            .unwrap();
+        assert!(result.indexed);
+        assert_eq!(result.chunks_created, 1);
+
+        // search_chunks should work via BM25 (no vector component)
+        let results = mem
+            .search_chunks(
+                "keyword matching",
+                ChunkSearchOpts {
+                    scope: SearchScope::All,
+                    limit: 10,
+                    since: None,
+                    section_filter: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!results.is_empty(), "search should work without embeddings via BM25");
+        assert!(results[0].content.contains("keyword matching"));
+    }
+
+    // ── Cost ledger & budget tests ──────────────────────────────
+
+    #[test]
+    fn cost_ledger_records_and_sums() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.record_embedding_cost("openai:text-embedding-3-small", 1000, 0.02);
+        mem.record_embedding_cost("openai:text-embedding-3-small", 500, 0.02);
+        let (daily, monthly) = mem.embedding_spend_summary();
+        assert!((monthly - 0.03).abs() < 0.001);
+        assert!((daily - 0.03).abs() < 0.001);
+    }
+
+    #[test]
+    fn budget_check_passes_when_under_limit() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.record_embedding_cost("model", 100, 0.01);
+        assert!(mem.check_embedding_budget(1.0, 10.0).is_ok());
+    }
+
+    #[test]
+    fn budget_check_monthly_exceeded() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.record_embedding_cost("model", 10_000, 0.01);
+        let result = mem.check_embedding_budget(0.0, 0.05);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn budget_check_daily_exceeded() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.record_embedding_cost("model", 10_000, 0.01);
+        let result = mem.check_embedding_budget(0.05, 0.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn budget_check_zero_means_unlimited() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.record_embedding_cost("model", 1_000_000, 1.0);
+        assert!(mem.check_embedding_budget(0.0, 0.0).is_ok());
     }
 }
