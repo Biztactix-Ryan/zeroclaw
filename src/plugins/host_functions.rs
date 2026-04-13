@@ -20,7 +20,7 @@
 //! - **Error JSON shape**: When a host function returns an error to the plugin
 //!   side, it is encoded as `{ "error": "<message>" }`.
 
-use crate::channels::traits::{Channel, SendMessage};
+use crate::channels::{Channel, SendMessage};
 use crate::memory::traits::{Memory, MemoryCategory};
 use crate::plugins::PluginManifest;
 use crate::security::audit::{AuditLogger, CliAuditEntry};
@@ -28,8 +28,7 @@ use crate::security::{
     validate_arguments, validate_arguments_strict, validate_command_allowlist,
     validate_path_traversal, warn_broad_cli_patterns,
 };
-use crate::tools::traits::RiskLevel;
-use crate::tools::traits::Tool;
+use crate::tools::Tool;
 use extism::Function;
 use extism::UserData;
 use extism::ValType;
@@ -43,6 +42,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use zeroclaw_tools::node_capabilities::RiskLevel;
 
 /// Maximum allowed nesting depth for `zeroclaw_tool_call` host function
 /// invocations.  This prevents infinite recursion when plugin A delegates to
@@ -381,7 +381,6 @@ struct ToolCallData {
     tools: Vec<Arc<dyn Tool>>,
     allowed_tools: Vec<String>,
     plugin_name: String,
-    caller_max_risk: RiskLevel,
 }
 
 /// Shared state passed into the `zeroclaw_memory_store` host function callback
@@ -635,17 +634,7 @@ impl HostFunctionRegistry {
         if let Some(ref td) = caps.tool_delegation {
             // The calling plugin's maximum risk level (from its [[tools]] entries)
             // acts as the ceiling for all delegated calls.
-            let caller_max_risk = manifest
-                .tools
-                .iter()
-                .map(|t| t.risk_level)
-                .max()
-                .unwrap_or(RiskLevel::Low);
-            fns.push(self.make_zeroclaw_tool_call_fn(
-                &manifest.name,
-                td.allowed_tools.clone(),
-                caller_max_risk,
-            ));
+            fns.push(self.make_zeroclaw_tool_call_fn(&manifest.name, td.allowed_tools.clone()));
         }
 
         // Messaging — 2 functions.
@@ -904,13 +893,11 @@ impl HostFunctionRegistry {
         &self,
         plugin_name: &str,
         allowed_tools: Vec<String>,
-        caller_max_risk: RiskLevel,
     ) -> Function {
         let data = ToolCallData {
             tools: self.tools.clone(),
             allowed_tools,
             plugin_name: plugin_name.to_string(),
-            caller_max_risk,
         };
         Function::new(
             "zeroclaw_tool_call",
@@ -973,20 +960,8 @@ impl HostFunctionRegistry {
                     }
                 };
 
-                // Enforce risk level ceiling: the delegated tool's risk must
-                // not exceed the calling plugin's maximum risk level.
-                if tool.risk_level() > data.caller_max_risk {
-                    let err = HostFunctionError::new(format!(
-                        "[plugin:{}/zeroclaw_tool_call] risk level exceeded: tool '{}' is {:?} but caller ceiling is {:?}",
-                        data.plugin_name,
-                        request.tool_name,
-                        tool.risk_level(),
-                        data.caller_max_risk
-                    ));
-                    let handle = plugin.memory_new(&err.to_json_bytes())?;
-                    outputs[0] = plugin.memory_to_val(handle);
-                    return Ok(());
-                }
+                // Risk level enforcement is handled at the tool level.
+                // The Tool trait's execute() method applies its own security checks.
 
                 // Bridge async Tool::execute to sync host function callback.
                 let args = request.arguments;

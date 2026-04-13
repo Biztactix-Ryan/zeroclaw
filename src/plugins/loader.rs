@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use super::PluginManifest;
-use super::error::PluginError;
-use crate::config::schema::Config;
-use crate::security::SecurityPolicy;
+use crate::config::Config;
+use crate::plugins::PluginManifest;
+use crate::plugins::error::PluginError;
+use zeroclaw_config::policy::SecurityPolicy;
 
 /// Paths that plugins are never allowed to access, regardless of configuration.
 ///
@@ -445,7 +445,9 @@ impl<'a> PluginLoader<'a> {
             };
 
             match std::fs::read_to_string(&manifest_path) {
-                Ok(content) => match PluginManifest::parse(&content) {
+                Ok(content) => match toml::from_str(&content)
+                    .map_err(|e| PluginError::InvalidManifest(e.to_string()))
+                {
                     Ok(manifest) => {
                         descriptors.push(PluginDescriptor {
                             manifest,
@@ -1010,7 +1012,7 @@ logs  = "/var/log/app"
             risk_level = "medium"
         "#;
 
-        let pm = PluginManifest::parse(toml_str).expect("flat TOML should parse");
+        let pm = toml::from_str::<PluginManifest>(toml_str).expect("flat TOML should parse");
         assert_eq!(pm.allowed_hosts, vec!["api.example.com", "cdn.example.com"]);
 
         let result = build_extism_manifest(&pm, Path::new("/tmp"), None);
@@ -1045,7 +1047,7 @@ logs  = "/var/log/app"
             risk_level = "medium"
         "#;
 
-        let pm = PluginManifest::parse(toml_str).expect("nested TOML should parse");
+        let pm = toml::from_str::<PluginManifest>(toml_str).expect("nested TOML should parse");
         assert_eq!(pm.allowed_hosts, vec!["httpbin.org", "example.com"]);
 
         let result = build_extism_manifest(&pm, Path::new("/tmp"), None);

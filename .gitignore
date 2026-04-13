@@ -62,3 +62,6 @@ rust_out
 
 # Test plugin build artifacts
 tests/plugins/target/
+
+# Auto-generated Tauri schemas
+apps/tauri/gen/schemas/linux-schema.json
