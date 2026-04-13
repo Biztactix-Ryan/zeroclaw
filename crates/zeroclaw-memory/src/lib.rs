@@ -7,6 +7,8 @@ pub mod conflict;
 pub mod consolidation;
 pub mod decay;
 pub mod embeddings;
+#[cfg(feature = "plugins-wasm")]
+pub mod embeddings_extism;
 pub mod hygiene;
 pub mod importance;
 pub mod knowledge_graph;
@@ -16,6 +18,7 @@ pub mod namespaced;
 pub mod none;
 pub mod policy;
 pub mod qdrant;
+pub mod reembed;
 pub mod response_cache;
 pub mod retrieval;
 pub mod snapshot;

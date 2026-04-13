@@ -186,6 +186,17 @@ pub fn create_embedding_provider(
             let key = api_key.unwrap_or("");
             Box::new(OpenAiEmbedding::new(base_url, key, model, dims))
         }
+        // ONNX WASM plugin provider — load from zeroclaw plugin system
+        #[cfg(feature = "plugins-wasm")]
+        "onnx-wasm" | "onnx" | "wasm-plugin" => {
+            match super::embeddings_extism::ExtismEmbedding::new(model, api_key) {
+                Ok(provider) => Box::new(provider),
+                Err(e) => {
+                    tracing::error!(provider, model, "failed to load WASM embedding plugin: {e:#}");
+                    Box::new(NoopEmbedding)
+                }
+            }
+        }
         _ => Box::new(NoopEmbedding),
     }
 }

@@ -5307,6 +5307,48 @@ pub struct MemoryConfig {
     #[serde(default)]
     #[nested]
     pub qdrant: QdrantConfig,
+
+    // ── TurboQuant: Embedding Compression ──────────────────────────
+    /// Quantize embedding vectors before storage to reduce DB size.
+    /// Options: "none" (f32, default), "int8" (4x compression), "int4" (8x).
+    #[serde(default = "default_embedding_quantization")]
+    pub embedding_quantization: String,
+
+    // ── Multi-Model Embedding ─────────────────────────────────────
+    /// Local ONNX embedding model for multi-model search (opt-in).
+    #[serde(default)]
+    #[nested]
+    pub embedding_models_local: Option<EmbeddingModelsLocal>,
+    /// Budget limits for embedding API costs (opt-in).
+    #[serde(default)]
+    #[nested]
+    pub embedding_budget: Option<EmbeddingBudget>,
+}
+
+/// Local ONNX embedding model configuration for multi-model search.
+#[derive(Debug, Clone, Serialize, Deserialize, Configurable, Default)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[prefix = "memory.embedding_models_local"]
+pub struct EmbeddingModelsLocal {
+    /// Provider name (e.g., "onnx-wasm").
+    pub provider: String,
+    /// Model name (e.g., "minilm-l6-v2").
+    pub model: String,
+    /// Embedding dimensions (e.g., 384).
+    pub dimensions: usize,
+}
+
+/// Budget limits for embedding API costs.
+#[derive(Debug, Clone, Serialize, Deserialize, Configurable, Default)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[prefix = "memory.embedding_budget"]
+pub struct EmbeddingBudget {
+    /// Daily spending limit in USD (0.0 = unlimited).
+    #[serde(default)]
+    pub daily_limit_usd: f64,
+    /// Monthly spending limit in USD (0.0 = unlimited).
+    #[serde(default)]
+    pub monthly_limit_usd: f64,
 }
 
 /// Memory policy configuration (`[memory.policy]` section).
@@ -5383,6 +5425,9 @@ fn default_cache_size() -> usize {
 fn default_chunk_size() -> usize {
     512
 }
+fn default_embedding_quantization() -> String {
+    "int8".into()
+}
 fn default_response_cache_ttl() -> u32 {
     60
 }
@@ -5430,6 +5475,9 @@ impl Default for MemoryConfig {
             policy: MemoryPolicyConfig::default(),
             sqlite_open_timeout_secs: None,
             qdrant: QdrantConfig::default(),
+            embedding_quantization: default_embedding_quantization(),
+            embedding_models_local: None,
+            embedding_budget: None,
         }
     }
 }

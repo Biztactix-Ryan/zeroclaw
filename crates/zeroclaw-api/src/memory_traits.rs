@@ -321,3 +321,112 @@ mod tests {
         assert!(parsed.superseded_by.is_none());
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KnowledgeStore — multi-source document indexing and chunk search
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Search scope for chunk queries.
+#[derive(Debug, Clone)]
+pub enum SearchScope {
+    /// Limit to a single source.
+    Source(String),
+    /// Limit to an explicit list of sources.
+    Sources(Vec<String>),
+    /// Search across all sources.
+    All,
+}
+
+/// Registration input for a new knowledge source.
+#[derive(Debug, Clone)]
+pub struct SourceRegistration {
+    pub source_id: String,
+    pub display_name: String,
+    pub uri_scheme: String,
+    pub plugin_version: Option<String>,
+    pub config: Option<serde_json::Value>,
+}
+
+/// A single chunk to be indexed.
+#[derive(Debug, Clone)]
+pub struct ChunkInput {
+    pub content: String,
+    pub start_line: Option<u32>,
+    pub end_line: Option<u32>,
+    pub chunk_index: u32,
+    pub section_path: Option<String>,
+}
+
+/// Complete document input for indexing.
+#[derive(Debug, Clone)]
+pub struct DocumentInput {
+    pub source_id: String,
+    pub source_uri: String,
+    pub title: Option<String>,
+    pub content_hash: Option<String>,
+    pub chunks: Vec<ChunkInput>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Result of an indexing operation.
+#[derive(Debug, Clone)]
+pub struct IndexResult {
+    pub indexed: bool,
+    pub chunks_created: usize,
+    pub skipped: bool,
+}
+
+/// A chunk returned from search.
+#[derive(Debug, Clone)]
+pub struct ChunkResult {
+    pub chunk_id: String,
+    pub content: String,
+    pub source_id: String,
+    pub source_uri: String,
+    pub section_path: Option<String>,
+    pub score: f32,
+}
+
+/// Options for chunk search.
+#[derive(Debug, Clone)]
+pub struct ChunkSearchOpts {
+    pub scope: SearchScope,
+    pub limit: usize,
+    pub since: Option<String>,
+    pub section_filter: Option<String>,
+}
+
+/// A registered knowledge source.
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub source_id: String,
+    pub display_name: String,
+    pub uri_scheme: String,
+    pub registered_at: String,
+    pub last_sync_at: Option<String>,
+}
+
+/// Aggregate stats for a source.
+#[derive(Debug, Clone)]
+pub struct SourceStats {
+    pub doc_count: usize,
+    pub chunk_count: usize,
+    pub last_indexed_at: Option<String>,
+}
+
+/// Knowledge store trait — implement to add multi-source chunk indexing
+/// on top of an existing Memory backend.
+#[async_trait]
+pub trait KnowledgeStore: Send + Sync {
+    async fn register_source(&self, source: SourceRegistration) -> anyhow::Result<()>;
+    async fn index_document(&self, doc: DocumentInput) -> anyhow::Result<IndexResult>;
+    async fn remove_document(&self, source_uri: &str) -> anyhow::Result<()>;
+    async fn search_chunks(
+        &self,
+        query: &str,
+        opts: ChunkSearchOpts,
+    ) -> anyhow::Result<Vec<ChunkResult>>;
+    async fn list_sources(&self) -> anyhow::Result<Vec<Source>>;
+    async fn source_stats(&self, source_id: &str) -> anyhow::Result<SourceStats>;
+    async fn health(&self) -> anyhow::Result<bool>;
+}

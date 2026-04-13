@@ -23,6 +23,13 @@ tokio = { version = "1.50", default-features = false, features = ["fs", "sync", 
 tracing = { version = "0.1", default-features = false }
 uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
 
+# WASM plugin runtime (optional, for embedding plugins)
+extism = { version = "1.20", optional = true }
+
+[features]
+default = []
+plugins-wasm = ["dep:extism"]
+
 [dev-dependencies]
 tempfile = "3.26"
 tokio = { version = "1.50", features = ["rt-multi-thread", "macros"] }

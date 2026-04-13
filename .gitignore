@@ -65,3 +65,6 @@ tests/plugins/target/
 
 # Auto-generated Tauri schemas
 apps/tauri/gen/schemas/linux-schema.json
+
+# WASM embedding plugins (built separately, contain large ONNX models)
+plugins/

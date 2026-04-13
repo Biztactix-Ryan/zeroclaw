@@ -1,5 +1,9 @@
 use super::embeddings::EmbeddingProvider;
-use super::traits::{ExportFilter, Memory, MemoryCategory, MemoryEntry};
+use super::traits::{
+    ChunkInput, ChunkResult, ChunkSearchOpts, DocumentInput, ExportFilter, IndexResult,
+    KnowledgeStore, Memory, MemoryCategory, MemoryEntry, SearchScope, Source, SourceRegistration,
+    SourceStats,
+};
 use super::vector;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -28,13 +32,17 @@ const SQLITE_OPEN_TIMEOUT_CAP_SECS: u64 = 300;
 /// - **Safe Reindex**: temp DB → seed → sync → atomic swap → rollback
 pub struct SqliteMemory {
     conn: Arc<Mutex<Connection>>,
-    #[allow(dead_code)] // stored for potential future use (e.g., reindex, diagnostics)
+    #[allow(dead_code)]
     db_path: PathBuf,
     embedder: Arc<dyn EmbeddingProvider>,
     vector_weight: f32,
     keyword_weight: f32,
     cache_max: usize,
     search_mode: SearchMode,
+    // Phase 4: local embedder for multi-model indexing (MAX-fusion)
+    local_embedder: Option<Arc<dyn EmbeddingProvider>>,
+    // TurboQuant: embedding quantization mode
+    quantization: vector::BitWidth,
 }
 
 impl SqliteMemory {
@@ -73,6 +81,8 @@ impl SqliteMemory {
             keyword_weight: 0.3,
             cache_max: 10_000,
             search_mode: SearchMode::default(),
+            local_embedder: None,
+            quantization: vector::BitWidth::Int8,
         })
     }
 
@@ -122,6 +132,8 @@ impl SqliteMemory {
             keyword_weight,
             cache_max,
             search_mode,
+            local_embedder: None,
+            quantization: vector::BitWidth::Int8,
         })
     }
 
@@ -233,6 +245,117 @@ impl SqliteMemory {
             conn.execute_batch("ALTER TABLE memories ADD COLUMN superseded_by TEXT;")?;
         }
 
+        // Migration: add hit_count and is_pinned to embedding_cache
+        let cache_exists = conn
+            .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='embedding_cache'")
+            .and_then(|mut s| s.query_row([], |row| row.get::<_, String>(0)))
+            .ok();
+        if let Some(ref cache_schema) = cache_exists {
+            if !cache_schema.contains("hit_count") {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE embedding_cache ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0;",
+                );
+            }
+            if !cache_schema.contains("is_pinned") {
+                let _ = conn.execute_batch(
+                    "ALTER TABLE embedding_cache ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;",
+                );
+            }
+        }
+
+        // ── Knowledge layer schema ──────────────────────────────────
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS sources (
+                source_id       TEXT PRIMARY KEY,
+                display_name    TEXT NOT NULL,
+                uri_scheme      TEXT NOT NULL,
+                plugin_version  TEXT,
+                config          TEXT,
+                registered_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                last_sync_at    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS source_documents (
+                doc_id          TEXT PRIMARY KEY,
+                source_id       TEXT NOT NULL,
+                source_uri      TEXT NOT NULL,
+                title           TEXT,
+                content_hash    TEXT,
+                chunk_count     INTEGER NOT NULL DEFAULT 0,
+                total_tokens    INTEGER NOT NULL DEFAULT 0,
+                indexed_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                metadata        TEXT,
+                FOREIGN KEY (source_id) REFERENCES sources(source_id) ON DELETE CASCADE,
+                UNIQUE (source_id, source_uri)
+            );
+            CREATE INDEX IF NOT EXISTS idx_docs_source ON source_documents(source_id);
+            CREATE INDEX IF NOT EXISTS idx_docs_uri   ON source_documents(source_uri);
+
+            CREATE TABLE IF NOT EXISTS chunks (
+                chunk_id        TEXT PRIMARY KEY,
+                doc_id          TEXT NOT NULL,
+                source_id       TEXT NOT NULL,
+                content         TEXT NOT NULL,
+                start_line      INTEGER,
+                end_line        INTEGER,
+                chunk_index     INTEGER NOT NULL DEFAULT 0,
+                section_path    TEXT,
+                embedding       BLOB,
+                embedding_model TEXT,
+                created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY (doc_id)    REFERENCES source_documents(doc_id)  ON DELETE CASCADE,
+                FOREIGN KEY (source_id) REFERENCES sources(source_id)       ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
+            CREATE INDEX IF NOT EXISTS idx_chunks_doc   ON chunks(doc_id);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                content, content=chunks, content_rowid=rowid
+            );
+            CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+                INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+                INSERT INTO chunks_fts(chunks_fts, rowid, content)
+                VALUES ('delete', old.rowid, old.content);
+            END;
+
+            CREATE TABLE IF NOT EXISTS chunk_embeddings (
+                chunk_embedding_id TEXT PRIMARY KEY,
+                chunk_id           TEXT NOT NULL,
+                model_id           TEXT NOT NULL,
+                embedding          BLOB NOT NULL,
+                dimensions         INTEGER NOT NULL,
+                created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY (chunk_id) REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+                UNIQUE (chunk_id, model_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_chunk_emb_chunk ON chunk_embeddings(chunk_id);
+
+            CREATE TABLE IF NOT EXISTS embedding_cost_ledger (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id        TEXT NOT NULL,
+                tokens_used     INTEGER NOT NULL,
+                cost_usd        REAL NOT NULL,
+                period          TEXT NOT NULL,
+                recorded_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_cost_period ON embedding_cost_ledger(period);
+
+            CREATE TABLE IF NOT EXISTS reembed_queue (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                chunk_id        TEXT NOT NULL,
+                model_id        TEXT NOT NULL,
+                priority        INTEGER NOT NULL DEFAULT 0,
+                retries         INTEGER NOT NULL DEFAULT 0,
+                queued_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY (chunk_id) REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+                UNIQUE (chunk_id, model_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_reembed_priority ON reembed_queue(priority DESC, queued_at ASC);",
+        )?;
+
         Ok(())
     }
 
@@ -276,6 +399,82 @@ impl SqliteMemory {
         &self.conn
     }
 
+    // ── Cost Ledger & Budget Enforcement ─────────────────────────────
+
+    /// Record an embedding cost in the ledger.
+    pub fn record_embedding_cost(&self, model_id: &str, tokens_used: usize, cost_per_1k: f64) {
+        let cost_usd = cost_per_1k * (tokens_used as f64 / 1000.0);
+        let period = chrono::Utc::now().format("%Y-%m").to_string();
+        let conn = self.conn.lock();
+        let _ = conn.execute(
+            "INSERT INTO embedding_cost_ledger (model_id, tokens_used, cost_usd, period)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![model_id, tokens_used as i64, cost_usd, period],
+        );
+    }
+
+    /// Check if the current period's spend is within budget.
+    pub fn check_embedding_budget(&self, daily_limit: f64, monthly_limit: f64) -> anyhow::Result<()> {
+        let now = chrono::Utc::now();
+        let period = now.format("%Y-%m").to_string();
+        let today = now.format("%Y-%m-%d").to_string();
+        let conn = self.conn.lock();
+
+        if monthly_limit > 0.0 {
+            let spend: f64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(cost_usd), 0.0) FROM embedding_cost_ledger WHERE period = ?1",
+                    params![period],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0.0);
+            if spend >= monthly_limit {
+                anyhow::bail!("monthly embedding budget exceeded: ${spend:.4} / ${monthly_limit:.2}");
+            }
+        }
+
+        if daily_limit > 0.0 {
+            let spend: f64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(cost_usd), 0.0) FROM embedding_cost_ledger WHERE recorded_at >= ?1",
+                    params![format!("{today}T00:00:00Z")],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0.0);
+            if spend >= daily_limit {
+                anyhow::bail!("daily embedding budget exceeded: ${spend:.4} / ${daily_limit:.2}");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get current period spend summary.
+    pub fn embedding_spend_summary(&self) -> (f64, f64) {
+        let now = chrono::Utc::now();
+        let period = now.format("%Y-%m").to_string();
+        let today = now.format("%Y-%m-%d").to_string();
+        let conn = self.conn.lock();
+
+        let monthly: f64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) FROM embedding_cost_ledger WHERE period = ?1",
+                params![period],
+                |row| row.get(0),
+            )
+            .unwrap_or(0.0);
+
+        let daily: f64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) FROM embedding_cost_ledger WHERE recorded_at >= ?1",
+                params![format!("{today}T00:00:00Z")],
+                |row| row.get(0),
+            )
+            .unwrap_or(0.0);
+
+        (daily, monthly)
+    }
+
     /// Get embedding from cache, or compute + cache it
     pub async fn get_or_compute_embedding(&self, text: &str) -> anyhow::Result<Option<Vec<f32>>> {
         if self.embedder.dimensions() == 0 {
@@ -299,7 +498,7 @@ impl SqliteMemory {
                     "UPDATE embedding_cache SET accessed_at = ?1 WHERE content_hash = ?2",
                     params![now_c, hash_c],
                 )?;
-                return Ok(Some(vector::bytes_to_vec(&bytes)));
+                return Ok(Some(vector::smart_decode(&bytes)));
             }
             Ok(None)
         })
@@ -311,7 +510,7 @@ impl SqliteMemory {
 
         // Compute embedding (async I/O)
         let embedding = self.embedder.embed_one(text).await?;
-        let bytes = vector::vec_to_bytes(&embedding);
+        let bytes = vector::encode_embedding(&embedding, self.quantization);
 
         // Store in cache + LRU eviction (offloaded to blocking thread)
         let conn = self.conn.clone();
@@ -419,7 +618,7 @@ impl SqliteMemory {
         let mut scored: Vec<(String, f32)> = Vec::new();
         for row in rows {
             let (id, blob) = row?;
-            let emb = vector::bytes_to_vec(&blob);
+            let emb = vector::smart_decode(&blob);
             let sim = vector::cosine_similarity(query_embedding, &emb);
             if sim > 0.0 {
                 scored.push((id, sim));
@@ -463,9 +662,10 @@ impl SqliteMemory {
         .await??;
 
         let mut count = 0;
+        let quantization = self.quantization;
         for (id, content) in &entries {
             if let Ok(Some(emb)) = self.get_or_compute_embedding(content).await {
-                let bytes = vector::vec_to_bytes(&emb);
+                let bytes = vector::encode_embedding(&emb, quantization);
                 let conn = self.conn.clone();
                 let id = id.clone();
                 tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
@@ -555,6 +755,547 @@ impl SqliteMemory {
         .await?
     }
 }
+#[async_trait]
+impl KnowledgeStore for SqliteMemory {
+    async fn register_source(&self, source: SourceRegistration) -> anyhow::Result<()> {
+        let source_id = source.source_id.trim();
+        let uri_scheme = source.uri_scheme.trim();
+
+        if source_id.is_empty() {
+            anyhow::bail!("source_id cannot be empty");
+        }
+        if source_id.len() > 64 {
+            anyhow::bail!("source_id must be 64 characters or fewer");
+        }
+        if source_id.bytes().any(|b| b.is_ascii_whitespace()) {
+            anyhow::bail!("source_id cannot contain whitespace");
+        }
+        if uri_scheme.is_empty() {
+            anyhow::bail!("uri_scheme cannot be empty");
+        }
+
+        let config_json = source.config.map(|v| v.to_string());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| {
+                chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
+                    .unwrap()
+                    .to_rfc3339()
+            })
+            .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
+
+        let source_id = source.source_id.clone();
+        let display_name = source.display_name.clone();
+        let uri_scheme = source.uri_scheme.clone();
+        let plugin_version = source.plugin_version.clone();
+
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock();
+            conn.execute(
+                "INSERT OR REPLACE INTO sources
+                 (source_id, display_name, uri_scheme, plugin_version, config, registered_at, last_sync_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    source_id,
+                    display_name,
+                    uri_scheme,
+                    plugin_version,
+                    config_json,
+                    now.clone(),
+                    now,
+                ],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    async fn index_document(&self, doc: DocumentInput) -> anyhow::Result<IndexResult> {
+        let embedder = self.embedder.clone();
+        let local_embedder = self.local_embedder.clone();
+        let local_model_id = local_embedder
+            .as_ref()
+            .map(|e| format!("{}:local", e.name()));
+
+        let source_id = doc.source_id.clone();
+        let source_uri = doc.source_uri.clone();
+        let content_hash = doc.content_hash.clone();
+        let title = doc.title;
+        let metadata = doc.metadata;
+
+        for chunk in &doc.chunks {
+            let trimmed = chunk.content.trim();
+            if trimmed.is_empty() {
+                anyhow::bail!("chunk at index {} has empty content", chunk.chunk_index);
+            }
+            let tokens = trimmed.split_whitespace().count();
+            if tokens < 10 {
+                anyhow::bail!(
+                    "chunk at index {} has {} tokens (min 10 required): '{}...'",
+                    chunk.chunk_index,
+                    tokens,
+                    &trimmed[..trimmed.len().min(80)]
+                );
+            }
+            if tokens > 1000 {
+                println!(
+                    "[WARN] chunk at index {} has {} tokens (>1000, will proceed): '{}...'",
+                    chunk.chunk_index,
+                    tokens,
+                    &trimmed[..trimmed.len().min(80)]
+                );
+            }
+        }
+
+        let contents: Vec<&str> = doc.chunks.iter().map(|c| c.content.as_str()).collect();
+        let embeddings: Vec<Vec<f32>> = if contents.is_empty() {
+            vec![]
+        } else {
+            embedder.embed(&contents).await?
+        };
+
+        let local_embeddings: Vec<Vec<f32>> = if let Some(ref le) = local_embedder {
+            if contents.is_empty() {
+                vec![]
+            } else {
+                le.embed(&contents).await.unwrap_or_else(|_| vec![])
+            }
+        } else {
+            vec![]
+        };
+
+        let chunk_entries: Vec<(String, ChunkInput, Option<Vec<f32>>, Option<Vec<f32>>)> = doc
+            .chunks
+            .into_iter()
+            .enumerate()
+            .map(|(i, chunk)| {
+                let emb = if i < embeddings.len() && !embeddings[i].is_empty() {
+                    Some(embeddings[i].clone())
+                } else {
+                    None
+                };
+                let local_emb = if i < local_embeddings.len() && !local_embeddings[i].is_empty() {
+                    Some(local_embeddings[i].clone())
+                } else {
+                    None
+                };
+                (Uuid::new_v4().to_string(), chunk, emb, local_emb)
+            })
+            .collect();
+
+        let conn = self.conn.clone();
+        let quantization = self.quantization;
+        tokio::task::spawn_blocking(move || -> anyhow::Result<IndexResult> {
+            let conn = conn.lock();
+
+            let source_exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sources WHERE source_id = ?1",
+                    params![source_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if !source_exists {
+                anyhow::bail!("source_id '{}' not registered; call register_source() first", source_id);
+            }
+
+            let existing_doc: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT doc_id, content_hash FROM source_documents WHERE source_id = ?1 AND source_uri = ?2",
+                    params![source_id, source_uri],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .ok();
+
+            let (doc_id, old_hash) = match existing_doc {
+                Some((id, hash)) => (id, Some(hash)),
+                None => (Uuid::new_v4().to_string(), None),
+            };
+
+            let skip = content_hash.as_ref().is_some_and(|ch| {
+                old_hash.as_ref().is_some_and(|oh| ch == oh)
+            });
+
+            if skip {
+                return Ok(IndexResult {
+                    indexed: false,
+                    chunks_created: 0,
+                    skipped: true,
+                });
+            }
+
+            let _ = conn.execute_batch("PRAGMA foreign_keys=OFF");
+
+            conn.execute(
+                "DELETE FROM chunks WHERE doc_id = ?1",
+                params![doc_id],
+            )?;
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let chunk_count = chunk_entries.len();
+            let total_tokens = chunk_count * 100;
+            let embedder_name = embedder.name();
+
+            for (chunk_id, chunk, emb_opt, local_emb_opt) in chunk_entries {
+                let emb_blob =
+                    emb_opt.map(|v| vector::encode_embedding(&v, quantization));
+                conn.execute(
+                    "INSERT INTO chunks (chunk_id, doc_id, source_id, content, start_line, end_line, chunk_index, section_path, embedding, embedding_model)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        chunk_id,
+                        doc_id,
+                        source_id,
+                        chunk.content,
+                        chunk.start_line,
+                        chunk.end_line,
+                        chunk.chunk_index,
+                        chunk.section_path,
+                        emb_blob,
+                        embedder_name,
+                    ],
+                )?;
+
+                if let (Some(local_emb), Some(model_id)) = (local_emb_opt, local_model_id.as_deref()) {
+                    let local_blob = vector::encode_embedding(&local_emb, quantization);
+                    let dims = local_emb.len();
+                    conn.execute(
+                        "INSERT OR REPLACE INTO chunk_embeddings
+                         (chunk_embedding_id, chunk_id, model_id, embedding, dimensions, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            Uuid::new_v4().to_string(),
+                            chunk_id,
+                            model_id,
+                            local_blob,
+                            dims,
+                            now,
+                        ],
+                    )?;
+                }
+            }
+
+            conn.execute(
+                "INSERT OR REPLACE INTO source_documents
+                 (doc_id, source_id, source_uri, title, content_hash, chunk_count, total_tokens, indexed_at, updated_at, metadata)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    doc_id,
+                    source_id,
+                    source_uri,
+                    title,
+                    content_hash,
+                    chunk_count,
+                    total_tokens,
+                    now,
+                    now,
+                    metadata.map(|m| m.to_string()),
+                ],
+            )?;
+
+            Ok(IndexResult {
+                indexed: true,
+                chunks_created: chunk_count,
+                skipped: false,
+            })
+        })
+        .await?
+    }
+
+    async fn remove_document(&self, source_uri: &str) -> anyhow::Result<()> {
+        let conn = self.conn.clone();
+        let source_uri = source_uri.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock();
+            conn.execute(
+                "DELETE FROM source_documents WHERE source_uri = ?1",
+                params![source_uri],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    async fn source_stats(&self, source_id: &str) -> anyhow::Result<SourceStats> {
+        let conn = self.conn.clone();
+        let source_id = source_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<SourceStats> {
+            let conn = conn.lock();
+
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sources WHERE source_id = ?1",
+                    params![source_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if !exists {
+                anyhow::bail!("source_id '{}' not found", source_id);
+            }
+
+            let (doc_count, chunk_count, last_indexed): (i64, i64, Option<String>) = conn
+                .query_row(
+                    "SELECT COUNT(*), COALESCE(SUM(chunk_count),0), MAX(indexed_at)
+                     FROM source_documents WHERE source_id = ?1",
+                    params![source_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap_or((0, 0, None));
+
+            Ok(SourceStats {
+                doc_count: doc_count as usize,
+                chunk_count: chunk_count as usize,
+                last_indexed_at: last_indexed,
+            })
+        })
+        .await?
+    }
+
+    async fn search_chunks(
+        &self,
+        query: &str,
+        opts: ChunkSearchOpts,
+    ) -> anyhow::Result<Vec<ChunkResult>> {
+        let embedder = self.embedder.clone();
+        let vector_weight = self.vector_weight;
+        let keyword_weight = self.keyword_weight;
+        let relevance_decay_alpha: Option<f64> = None;
+
+        let query_vec: Vec<f32> = embedder.embed_one(query).await?;
+        let query_vec_arc = Arc::new(query_vec);
+
+        // MAX-fusion: embed query with local model too (if configured)
+        let local_query_vec: Option<Arc<Vec<f32>>> = if let Some(ref le) = self.local_embedder {
+            le.embed_one(query).await.ok().map(Arc::new)
+        } else {
+            None
+        };
+        let query_str = query.to_string();
+        let opts_clone = ChunkSearchOpts {
+            scope: match opts.scope {
+                SearchScope::Source(id) => SearchScope::Source(id),
+                SearchScope::Sources(ids) => {
+                    SearchScope::Sources(ids)
+                }
+                SearchScope::All => SearchScope::All,
+            },
+            limit: opts.limit,
+            since: opts.since.clone(),
+            section_filter: opts.section_filter.clone(),
+        };
+        let opts_scope = match opts_clone.scope {
+            SearchScope::Source(id) => {
+                format!("AND c.source_id = '{}'", id.replace("'", "''"))
+            }
+            SearchScope::Sources(ids) => {
+                let list = ids
+                    .iter()
+                    .map(|s| format!("'{}'", s.replace("'", "''")))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("AND c.source_id IN ({})", list)
+            }
+            SearchScope::All => String::new(),
+        };
+        let opts_since = opts_clone.since;
+        let opts_section = opts_clone.section_filter;
+        let opts_limit = opts_clone.limit;
+
+        let conn = self.conn.clone();
+        let local_qv = local_query_vec;
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ChunkResult>> {
+            let conn = conn.lock();
+            let query_vec = query_vec_arc.as_ref();
+
+            let since_filter = opts_since
+                .as_ref()
+                .map(|s| format!("AND c.created_at >= '{}'", s.replace("'", "''")))
+                .unwrap_or_default();
+
+            let section_filter_sql = opts_section
+                .as_ref()
+                .map(|s| format!("AND c.section_path LIKE '%{}%'", s.replace("'", "''")))
+                .unwrap_or_default();
+
+            let fts_query = query_str
+                .split_whitespace()
+                .map(|w| format!("\"{}*\"", w.replace("'", "''")))
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            if fts_query.is_empty() {
+                return Ok(vec![]);
+            }
+
+            let sql = format!(
+                "SELECT
+                    c.chunk_id,
+                    c.content,
+                    c.source_id,
+                    c.section_path,
+                    d.source_uri,
+                    c.embedding,
+                    c.created_at,
+                    bm25(chunks_fts) AS bm25_score
+                 FROM chunks_fts f
+                 JOIN chunks c ON c.rowid = f.rowid
+                 JOIN source_documents d ON d.doc_id = c.doc_id
+                 WHERE chunks_fts MATCH '{fts_query}' {opts_scope} {since_filter} {section_filter_sql}
+                 LIMIT {limit}",
+                fts_query = fts_query,
+                opts_scope = opts_scope,
+                since_filter = since_filter,
+                section_filter_sql = section_filter_sql,
+                limit = opts_limit.max(100)
+            );
+
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], |row| {
+                let chunk_id: String = row.get(0)?;
+                let content: String = row.get(1)?;
+                let source_id: String = row.get(2)?;
+                let section_path: Option<String> = row.get(3)?;
+                let source_uri: String = row.get(4)?;
+                let embedding_blob: Option<Vec<u8>> = row.get(5)?;
+                let created_at: String = row.get(6)?;
+                let bm25_raw: f64 = row.get(7)?;
+
+                Ok((
+                    chunk_id,
+                    content,
+                    source_id,
+                    section_path,
+                    source_uri,
+                    embedding_blob,
+                    created_at,
+                    bm25_raw,
+                ))
+            })?;
+
+            let mut results: Vec<(f32, ChunkResult)> = Vec::new();
+
+            for row in rows.filter_map(|r| r.ok()) {
+                let (
+                    chunk_id,
+                    content,
+                    source_id,
+                    section_path,
+                    source_uri,
+                    embedding_blob,
+                    created_at,
+                    bm25_raw,
+                ) = row;
+
+                // Primary model cosine similarity
+                let primary_sim = if let Some(ref blob) = embedding_blob {
+                    let emb = vector::smart_decode(blob);
+                    vector::cosine_similarity(query_vec, &emb)
+                } else {
+                    0.0
+                };
+
+                // MAX-fusion: check chunk_embeddings for additional model scores
+                let cosine_sim = if local_qv.is_some() {
+                    let mut max_sim = primary_sim;
+
+                    // Look up local model embedding for this chunk
+                    let local_emb: Option<Vec<u8>> = conn
+                        .prepare_cached(
+                            "SELECT embedding FROM chunk_embeddings WHERE chunk_id = ?1 LIMIT 1",
+                        )
+                        .ok()
+                        .and_then(|mut stmt| {
+                            stmt.query_row(params![chunk_id], |row| row.get(0)).ok()
+                        });
+
+                    if let (Some(blob), Some(lqv)) = (local_emb, &local_qv) {
+                        let emb = vector::smart_decode(&blob);
+                        let local_sim = vector::cosine_similarity(lqv, &emb);
+                        if local_sim > max_sim {
+                            max_sim = local_sim;
+                        }
+                    }
+
+                    max_sim
+                } else {
+                    primary_sim
+                };
+
+                let bm25_norm = ((-bm25_raw.abs()) / 20.0).exp() as f32;
+
+                let raw_score = vector_weight * cosine_sim + keyword_weight * bm25_norm;
+
+                let alpha = relevance_decay_alpha.unwrap_or(0.0) as f32;
+                let decay = if alpha > 0.0 {
+                    let created = chrono::DateTime::parse_from_rfc3339(&created_at)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now());
+                    let now = chrono::Utc::now();
+                    let days = (now - created).num_days() as f32;
+                    1.0 / (1.0 + alpha * days)
+                } else {
+                    1.0
+                };
+
+                let final_score = raw_score * decay;
+
+                results.push((
+                    final_score,
+                    ChunkResult {
+                        chunk_id,
+                        content,
+                        source_id,
+                        source_uri,
+                        section_path,
+                        score: final_score,
+                    },
+                ));
+            }
+
+            results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Less));
+            let chunks: Vec<ChunkResult> = results
+                .into_iter()
+                .take(opts.limit)
+                .map(|(_, chunk)| chunk)
+                .collect();
+
+            Ok(chunks)
+        })
+        .await?
+    }
+
+    async fn list_sources(&self) -> anyhow::Result<Vec<Source>> {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<Source>> {
+            let conn = conn.lock();
+            let mut stmt = conn.prepare(
+                "SELECT source_id, display_name, uri_scheme, registered_at, last_sync_at FROM sources",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(Source {
+                    source_id: row.get(0)?,
+                    display_name: row.get(1)?,
+                    uri_scheme: row.get(2)?,
+                    registered_at: row.get(3)?,
+                    last_sync_at: row.get(4)?,
+                })
+            })?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        })
+        .await?
+    }
+
+    async fn health(&self) -> anyhow::Result<bool> {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock();
+            conn.execute("SELECT 1 FROM sources LIMIT 1", [])?;
+            Ok(true)
+        })
+        .await?
+    }
+}
 
 #[async_trait]
 impl Memory for SqliteMemory {
@@ -570,10 +1311,11 @@ impl Memory for SqliteMemory {
         session_id: Option<&str>,
     ) -> anyhow::Result<()> {
         // Compute embedding (async, before blocking work)
+        let quantization = self.quantization;
         let embedding_bytes = self
             .get_or_compute_embedding(content)
             .await?
-            .map(|emb| vector::vec_to_bytes(&emb));
+            .map(|emb| vector::encode_embedding(&emb, quantization));
 
         let conn = self.conn.clone();
         let key = key.to_string();
@@ -1096,10 +1838,11 @@ impl Memory for SqliteMemory {
         namespace: Option<&str>,
         importance: Option<f64>,
     ) -> anyhow::Result<()> {
+        let quantization = self.quantization;
         let embedding_bytes = self
             .get_or_compute_embedding(content)
             .await?
-            .map(|emb| vector::vec_to_bytes(&emb));
+            .map(|emb| vector::encode_embedding(&emb, quantization));
 
         let conn = self.conn.clone();
         let key = key.to_string();

@@ -479,6 +479,9 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         policy: zeroclaw_config::schema::MemoryPolicyConfig::default(),
         sqlite_open_timeout_secs: None,
         qdrant: zeroclaw_config::schema::QdrantConfig::default(),
+        embedding_quantization: "int8".into(),
+        embedding_models_local: None,
+        embedding_budget: None,
     }
 }
 
