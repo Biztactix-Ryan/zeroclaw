@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use zeroclaw::channels::traits::{Channel, ChannelMessage, SendMessage};
+use zeroclaw::channels::{Channel, ChannelMessage, SendMessage};
 use zeroclaw::config::AuditConfig;
 use zeroclaw::memory::none::NoneMemory;
 use zeroclaw::plugins::host_functions::{ChannelRateLimiter, HostFunctionRegistry};
@@ -25,6 +25,8 @@ use zeroclaw::security::audit::AuditLogger;
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
+
+type CallLog = Arc<Mutex<Vec<(String, String)>>>;
 
 /// Mock channel that records send calls for verification.
 struct TrackingChannel {
@@ -70,11 +72,7 @@ fn make_audit() -> Arc<AuditLogger> {
     Arc::new(AuditLogger::new(cfg, path).expect("audit logger"))
 }
 
-fn make_registry_with_channels() -> (
-    HostFunctionRegistry,
-    Arc<Mutex<Vec<(String, String)>>>,
-    Arc<Mutex<Vec<(String, String)>>>,
-) {
+fn make_registry_with_channels() -> (HostFunctionRegistry, CallLog, CallLog) {
     let calls_slack = Arc::new(Mutex::new(Vec::new()));
     let calls_email = Arc::new(Mutex::new(Vec::new()));
 

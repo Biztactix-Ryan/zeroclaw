@@ -204,7 +204,7 @@ fn each_execution_has_timestamp() {
 
     for i in 0..3 {
         let entry = CliAuditEntry::new(
-            &format!("plugin-{}", i),
+            format!("plugin-{}", i),
             "echo",
             &[format!("iteration-{}", i)],
             None,

@@ -1,7 +1,4 @@
-#![cfg(all(
-    feature = "plugins-wasm",
-    feature = "__disabled_pending_risk_level_trait"
-))]
+#![cfg(any())] // disabled: pending risk_level() trait restoration
 
 //! Integration test for risk level ceiling enforcement on tool delegation.
 //!
@@ -26,7 +23,7 @@ use zeroclaw::plugins::{
     PluginCapabilities, PluginManifest, RiskLevel, ToolDefinition, ToolDelegationCapability,
 };
 use zeroclaw::security::audit::AuditLogger;
-use zeroclaw::tools::traits::{Tool, ToolResult};
+use zeroclaw::tools::{Tool, ToolResult};
 
 /// A mock tool with a configurable risk level that records calls.
 struct RiskyTool {

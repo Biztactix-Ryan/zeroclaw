@@ -22,7 +22,7 @@ use zeroclaw::memory::none::NoneMemory;
 use zeroclaw::plugins::host_functions::HostFunctionRegistry;
 use zeroclaw::plugins::{PluginCapabilities, PluginManifest, ToolDelegationCapability};
 use zeroclaw::security::audit::AuditLogger;
-use zeroclaw::tools::traits::{Tool, ToolResult};
+use zeroclaw::tools::{Tool, ToolResult};
 
 /// A mock tool that records calls and returns a configurable response.
 struct TrackingTool {

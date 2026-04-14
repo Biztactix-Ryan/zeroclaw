@@ -193,7 +193,7 @@ fn plugin_with_memory_but_no_messaging_gets_no_messaging_functions() {
         "plugin with memory but no messaging must have zero messaging functions"
     );
     // Should have memory functions but no messaging
-    assert!(fns.len() >= 1, "should have memory functions");
+    assert!(!fns.is_empty(), "should have memory functions");
 }
 
 // ---------------------------------------------------------------------------

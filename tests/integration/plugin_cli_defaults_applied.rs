@@ -346,56 +346,32 @@ fn json_partial_limits_gets_defaults() {
 fn default_timeout_is_reasonable_for_typical_commands() {
     // 5 seconds should cover most typical CLI operations
     // like git status, ls, echo, etc.
-    assert!(
-        DEFAULT_CLI_TIMEOUT_MS >= 1_000,
-        "timeout should be at least 1 second"
-    );
-    assert!(
-        DEFAULT_CLI_TIMEOUT_MS <= 60_000,
-        "timeout should not exceed 1 minute"
-    );
+    const { assert!(DEFAULT_CLI_TIMEOUT_MS >= 1_000) };
+    const { assert!(DEFAULT_CLI_TIMEOUT_MS <= 60_000) };
 }
 
 /// Default max_output_bytes prevents memory exhaustion.
 #[test]
 fn default_max_output_bytes_prevents_memory_exhaustion() {
     // 1 MiB is generous for command output but won't exhaust memory
-    assert!(
-        DEFAULT_CLI_MAX_OUTPUT_BYTES <= 10 * 1024 * 1024,
-        "default output limit should not exceed 10 MiB"
-    );
-    assert!(
-        DEFAULT_CLI_MAX_OUTPUT_BYTES >= 64 * 1024,
-        "default output limit should allow at least 64 KiB"
-    );
+    const { assert!(DEFAULT_CLI_MAX_OUTPUT_BYTES <= 10 * 1024 * 1024) };
+    const { assert!(DEFAULT_CLI_MAX_OUTPUT_BYTES >= 64 * 1024) };
 }
 
 /// Default max_concurrent prevents fork bombs.
 #[test]
 fn default_max_concurrent_prevents_fork_bombs() {
     // Low concurrency limit prevents runaway process spawning
-    assert!(
-        DEFAULT_CLI_MAX_CONCURRENT >= 1,
-        "at least 1 concurrent command"
-    );
-    assert!(
-        DEFAULT_CLI_MAX_CONCURRENT <= 10,
-        "not too many concurrent commands"
-    );
+    const { assert!(DEFAULT_CLI_MAX_CONCURRENT >= 1) };
+    const { assert!(DEFAULT_CLI_MAX_CONCURRENT <= 10) };
 }
 
 /// Default rate_limit_per_minute prevents abuse.
 #[test]
 fn default_rate_limit_prevents_abuse() {
     // Rate limiting prevents rapid-fire command execution
-    assert!(
-        DEFAULT_CLI_RATE_LIMIT_PER_MINUTE >= 1,
-        "at least 1 command per minute"
-    );
-    assert!(
-        DEFAULT_CLI_RATE_LIMIT_PER_MINUTE <= 100,
-        "not too many commands per minute"
-    );
+    const { assert!(DEFAULT_CLI_RATE_LIMIT_PER_MINUTE >= 1) };
+    const { assert!(DEFAULT_CLI_RATE_LIMIT_PER_MINUTE <= 100) };
 }
 
 // ---------------------------------------------------------------------------

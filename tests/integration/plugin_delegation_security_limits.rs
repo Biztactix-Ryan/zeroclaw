@@ -1,7 +1,4 @@
-#![cfg(all(
-    feature = "plugins-wasm",
-    feature = "__disabled_pending_risk_level_trait"
-))]
+#![cfg(any())] // disabled: pending risk_level() trait restoration
 
 //! Integration test for delegation security limits (combined).
 //!
@@ -25,7 +22,7 @@ use zeroclaw::plugins::{
 use zeroclaw::security::SecurityPolicy;
 use zeroclaw::security::audit::AuditLogger;
 use zeroclaw::tools::DelegateTool;
-use zeroclaw::tools::traits::{Tool, ToolResult};
+use zeroclaw::tools::{Tool, ToolResult};
 
 // ---------------------------------------------------------------------------
 // Test helpers

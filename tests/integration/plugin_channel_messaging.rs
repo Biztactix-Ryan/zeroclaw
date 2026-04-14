@@ -10,12 +10,14 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use zeroclaw::channels::traits::{Channel, ChannelMessage, SendMessage};
+use zeroclaw::channels::{Channel, ChannelMessage, SendMessage};
 use zeroclaw::config::AuditConfig;
 use zeroclaw::memory::none::NoneMemory;
 use zeroclaw::plugins::host_functions::HostFunctionRegistry;
 use zeroclaw::plugins::{MessagingCapability, PluginCapabilities, PluginManifest};
 use zeroclaw::security::audit::AuditLogger;
+
+type CallTracker = Arc<Mutex<Vec<(String, String)>>>;
 
 // ---------------------------------------------------------------------------
 // Mock channel that records send() calls
@@ -90,12 +92,9 @@ fn make_manifest(name: &str, allowed_channels: Vec<String>) -> PluginManifest {
 
 fn make_registry_with_channels(
     channel_names: &[&'static str],
-) -> (
-    HostFunctionRegistry,
-    HashMap<&'static str, Arc<Mutex<Vec<(String, String)>>>>,
-) {
+) -> (HostFunctionRegistry, HashMap<&'static str, CallTracker>) {
     let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
-    let mut trackers: HashMap<&'static str, Arc<Mutex<Vec<(String, String)>>>> = HashMap::new();
+    let mut trackers: HashMap<&'static str, CallTracker> = HashMap::new();
 
     for &name in channel_names {
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -201,7 +200,7 @@ fn dispatch_to_missing_channel_returns_none() {
     let (registry, _) = make_registry_with_channels(&["slack"]);
 
     assert!(
-        registry.channels.get("nonexistent").is_none(),
+        !registry.channels.contains_key("nonexistent"),
         "looking up an unregistered channel must return None"
     );
 }

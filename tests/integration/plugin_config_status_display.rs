@@ -177,7 +177,7 @@ fn frontend_config_status(decl: &serde_json::Value) -> (bool, bool) {
         // bare string/number/bool → acts as default
         decl.is_string() || decl.is_number() || decl.is_boolean()
     };
-    let has_value = is_object && decl.get("value").map_or(false, |v| !v.is_null());
+    let has_value = is_object && decl.get("value").is_some_and(|v| !v.is_null());
     let is_set = has_default || has_value;
     (is_required, is_set)
 }

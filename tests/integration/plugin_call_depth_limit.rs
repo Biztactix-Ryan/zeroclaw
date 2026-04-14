@@ -17,7 +17,7 @@ use std::sync::Arc;
 use zeroclaw::config::schema::DelegateAgentConfig;
 use zeroclaw::security::SecurityPolicy;
 use zeroclaw::tools::DelegateTool;
-use zeroclaw::tools::traits::Tool;
+use zeroclaw::tools::Tool;
 
 fn test_security() -> Arc<SecurityPolicy> {
     Arc::new(SecurityPolicy::default())

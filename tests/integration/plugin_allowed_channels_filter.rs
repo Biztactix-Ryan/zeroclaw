@@ -16,12 +16,14 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use zeroclaw::channels::traits::{Channel, ChannelMessage, SendMessage};
+use zeroclaw::channels::{Channel, ChannelMessage, SendMessage};
 use zeroclaw::config::AuditConfig;
 use zeroclaw::memory::none::NoneMemory;
 use zeroclaw::plugins::host_functions::HostFunctionRegistry;
 use zeroclaw::plugins::{MessagingCapability, PluginCapabilities, PluginManifest};
 use zeroclaw::security::audit::AuditLogger;
+
+type CallTracker = Arc<Mutex<Vec<(String, String)>>>;
 
 /// A mock channel that records all `send()` calls.
 struct TrackingChannel {
@@ -85,12 +87,8 @@ fn make_manifest_with_messaging(allowed_channels: Vec<String>) -> PluginManifest
     m
 }
 
-fn make_registry_with_three_channels() -> (
-    HostFunctionRegistry,
-    Arc<Mutex<Vec<(String, String)>>>,
-    Arc<Mutex<Vec<(String, String)>>>,
-    Arc<Mutex<Vec<(String, String)>>>,
-) {
+fn make_registry_with_three_channels()
+-> (HostFunctionRegistry, CallTracker, CallTracker, CallTracker) {
     let calls_slack = Arc::new(Mutex::new(Vec::new()));
     let calls_email = Arc::new(Mutex::new(Vec::new()));
     let calls_telegram = Arc::new(Mutex::new(Vec::new()));

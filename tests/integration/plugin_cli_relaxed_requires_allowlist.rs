@@ -148,7 +148,7 @@ fn relaxed_level_rejects_whitespace_wildcard() {
     ];
 
     for allowed in test_cases {
-        let result = validate_command_allowlist("ls", &[allowed.clone()]);
+        let result = validate_command_allowlist("ls", std::slice::from_ref(&allowed));
         assert!(
             result.is_err(),
             "whitespace-padded wildcard '{}' must be rejected at Relaxed level",

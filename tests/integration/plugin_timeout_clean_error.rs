@@ -19,7 +19,7 @@ use serde_json::json;
 use zeroclaw::plugins::PluginManifest;
 use zeroclaw::plugins::loader::build_extism_manifest;
 use zeroclaw::plugins::wasm_tool::WasmTool;
-use zeroclaw::tools::traits::Tool;
+use zeroclaw::tools::Tool;
 
 fn project_root() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

@@ -49,7 +49,7 @@ fn frontend_shows_edit_button(decl: &serde_json::Value) -> bool {
 fn frontend_shows_masked_value(decl: &serde_json::Value) -> bool {
     let is_sensitive = is_sensitive_key(decl);
     let is_object = decl.is_object();
-    let has_value = is_object && decl.get("value").map_or(false, |v| !v.is_null());
+    let has_value = is_object && decl.get("value").is_some_and(|v| !v.is_null());
     let has_default = if is_object {
         decl.get("default").is_some()
     } else {

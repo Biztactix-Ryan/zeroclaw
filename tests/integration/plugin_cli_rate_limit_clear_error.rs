@@ -164,7 +164,7 @@ fn rate_limit_retry_after_is_reasonable() {
         .expect_err("should be rate limited");
 
     assert!(
-        retry_after >= 1 && retry_after <= 61,
+        (1..=61).contains(&retry_after),
         "retry_after should be 1-61 seconds for 1-minute window, got: {}",
         retry_after
     );

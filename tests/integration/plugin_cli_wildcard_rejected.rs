@@ -52,11 +52,12 @@ fn wildcard_with_whitespace_rejected() {
     ];
 
     for allowed in test_cases {
-        let result = validate_command_allowlist("ls", &[allowed.clone()]);
+        let debug = allowed.escape_debug().to_string();
+        let result = validate_command_allowlist("ls", &[allowed]);
         assert!(
             result.is_err(),
             "wildcard with whitespace '{}' must be rejected",
-            allowed.escape_debug()
+            debug
         );
     }
 }

@@ -40,7 +40,7 @@ fn host_function_registry_accepts_subsystem_references() {
 #[test]
 fn host_function_registry_accepts_multiple_tools() {
     use async_trait::async_trait;
-    use zeroclaw::tools::traits::{Tool, ToolResult};
+    use zeroclaw::tools::{Tool, ToolResult};
 
     struct StubTool(&'static str);
 

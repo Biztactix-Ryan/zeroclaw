@@ -7,7 +7,7 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use zeroclaw::channels::traits::{Channel, SendMessage};
+use zeroclaw::channels::{Channel, SendMessage};
 use zeroclaw::plugins::wasm_channel::WasmChannel;
 
 const CHANNEL_WASM: &str = "tests/plugins/artifacts/channel_plugin.wasm";

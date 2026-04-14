@@ -249,7 +249,7 @@ fn resolved_paths_usable_for_allowlist() {
     // The path should be usable for string comparison
     let path_str = path.to_string_lossy();
     assert!(
-        path_str.len() > 0,
+        !path_str.is_empty(),
         "path string representation should not be empty"
     );
 

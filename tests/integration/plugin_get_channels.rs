@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use zeroclaw::channels::traits::{Channel, ChannelMessage, SendMessage};
+use zeroclaw::channels::{Channel, ChannelMessage, SendMessage};
 use zeroclaw::config::AuditConfig;
 use zeroclaw::memory::none::NoneMemory;
 use zeroclaw::plugins::host_functions::HostFunctionRegistry;
@@ -298,7 +298,7 @@ fn channel_name_free_of_credential_patterns() {
         "hunter2", // The example secret
     ];
 
-    for (_key, channel) in &registry.channels {
+    for channel in registry.channels.values() {
         let name = channel.name().to_lowercase();
         for pattern in &credential_patterns {
             assert!(

@@ -350,7 +350,7 @@ fn cli_audit_entry_redacts_bearer_tokens() {
 
     // Bearer token should be detected and redacted
     assert!(
-        args[1].as_str().map_or(false, |s| s.contains("[REDACTED]")),
+        args[1].as_str().is_some_and(|s| s.contains("[REDACTED]")),
         "Bearer token header value should be redacted, got: {:?}",
         args[1]
     );

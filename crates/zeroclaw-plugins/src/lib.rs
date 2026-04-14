@@ -12,8 +12,10 @@ pub mod wasm_channel;
 pub mod wasm_tool;
 
 pub use capabilities::{
-    ArgPattern, CliCapability, ContextCapability, MemoryCapability, MessagingCapability,
-    PluginCapabilities, ToolDefinition, ToolDelegationCapability,
+    ArgPattern, CliCapability, ContextCapability, DEFAULT_CLI_MAX_CONCURRENT,
+    DEFAULT_CLI_MAX_OUTPUT_BYTES, DEFAULT_CLI_RATE_LIMIT_PER_MINUTE, DEFAULT_CLI_TIMEOUT_MS,
+    MemoryCapability, MessagingCapability, PluginCapabilities, ToolDefinition,
+    ToolDelegationCapability,
 };
 
 use serde::{Deserialize, Serialize};
@@ -65,6 +67,13 @@ pub struct PluginManifest {
     /// Host-side capabilities this plugin requests (memory, tool delegation, etc.).
     #[serde(default)]
     pub host_capabilities: PluginCapabilities,
+}
+
+impl PluginManifest {
+    /// Parse a manifest from a TOML string.
+    pub fn parse(toml_str: &str) -> Result<Self, error::PluginError> {
+        toml::from_str(toml_str).map_err(|e| error::PluginError::InvalidManifest(e.to_string()))
+    }
 }
 
 fn default_wasi() -> bool {

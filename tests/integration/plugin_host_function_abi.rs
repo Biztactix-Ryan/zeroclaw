@@ -13,7 +13,7 @@
 //! 4. Error messages always identify the plugin name and export function
 
 use serde_json::json;
-use zeroclaw::tools::traits::Tool;
+use zeroclaw::tools::Tool;
 
 /// Build a `WasmTool` backed by a minimal WASM module with no exports.
 /// Every `execute()` call will fail with "export not found", which is
@@ -51,7 +51,7 @@ async fn json_args_are_serialized_without_panic() {
     let complex_args = json!({
         "string": "hello world",
         "number": 42,
-        "float": 3.14,
+        "float": std::f64::consts::PI,
         "bool": true,
         "null_val": null,
         "nested": { "a": [1, 2, 3] },
